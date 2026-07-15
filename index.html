@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>エミライズ 顧客ボード</title>
+<style>
+  :root { --accent:#2f6f5f; --bg:#f4f6f5; --card:#fff; --line:#e3e8e6; --text:#1f2d2a; --sub:#6b7c77; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; background:var(--bg); color:var(--text); }
+  header { position:sticky; top:0; z-index:10; background:var(--accent); color:#fff; padding:10px 14px; display:flex; align-items:center; gap:10px; }
+  header .brand { font-weight:700; font-size:15px; margin-right:auto; }
+  header button, header a { background:rgba(255,255,255,.15); color:#fff; border:none; border-radius:8px; padding:7px 12px; font-size:13px; text-decoration:none; cursor:pointer; }
+  main { max-width:720px; margin:0 auto; padding:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  h2 { font-size:16px; margin:6px 2px 10px; }
+  h3 { font-size:13px; color:var(--sub); margin:14px 2px 6px; text-transform:none; }
+  .daynav { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+  .daynav button { border:1px solid var(--line); background:#fff; border-radius:10px; padding:8px 12px; font-size:14px; cursor:pointer; }
+  .daynav input { border:1px solid var(--line); border-radius:10px; padding:8px; font-size:14px; flex:1; }
+  .staff-head { display:flex; align-items:center; gap:8px; margin:16px 2px 6px; font-weight:700; font-size:14px; }
+  .staff-head .cnt { color:var(--sub); font-weight:400; font-size:12px; }
+  .row { display:flex; align-items:center; gap:10px; padding:12px 14px; background:#fff; border:1px solid var(--line); border-radius:12px; margin-bottom:8px; text-decoration:none; color:inherit; }
+  .row:active { background:#f0f4f2; }
+  .time { font-weight:700; font-variant-numeric:tabular-nums; min-width:46px; }
+  .cust { font-weight:600; flex:1; }
+  .menu { color:var(--sub); font-size:12px; max-width:34%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .badge { color:#fff; font-size:11px; border-radius:999px; padding:3px 8px; white-space:nowrap; }
+  .empty { color:var(--sub); text-align:center; padding:30px 0; }
+  .kv { display:grid; grid-template-columns:88px 1fr; gap:6px 10px; font-size:14px; }
+  .kv dt { color:var(--sub); } .kv dd { margin:0; word-break:break-all; }
+  .pill { display:inline-block; background:#eef3f1; border-radius:999px; padding:4px 10px; font-size:12px; margin:2px 4px 2px 0; }
+  .pill.warn { background:#fdecec; color:#b3261e; }
+  .hist { display:flex; gap:10px; padding:9px 2px; border-bottom:1px solid var(--line); font-size:13px; align-items:baseline; }
+  .hist:last-child { border-bottom:none; }
+  .hist .d { min-width:104px; font-variant-numeric:tabular-nums; }
+  .hist .future { color:var(--accent); font-weight:700; }
+  .note { border-bottom:1px solid var(--line); padding:10px 2px; }
+  .note:last-child { border-bottom:none; }
+  .note .meta { font-size:11px; color:var(--sub); margin-bottom:3px; }
+  textarea { width:100%; border:1px solid var(--line); border-radius:10px; padding:10px; font-size:14px; min-height:74px; font-family:inherit; }
+  .btn { background:var(--accent); color:#fff; border:none; border-radius:10px; padding:10px 18px; font-size:14px; cursor:pointer; }
+  .btn[disabled] { opacity:.5; }
+  .login-wrap { max-width:360px; margin:12vh auto 0; padding:0 16px; }
+  .login-wrap input { width:100%; border:1px solid var(--line); border-radius:10px; padding:12px; font-size:15px; margin-bottom:10px; }
+  .login-wrap .btn { width:100%; padding:12px; }
+  .err { color:#b3261e; font-size:13px; margin:8px 0; }
+  .searchbar { display:flex; gap:8px; margin-bottom:12px; }
+  .searchbar input { flex:1; border:1px solid var(--line); border-radius:10px; padding:10px; font-size:15px; }
+  .back { display:inline-block; margin-bottom:10px; color:var(--accent); text-decoration:none; font-size:14px; }
+  .qa { font-size:13px; padding:6px 2px; border-bottom:1px dashed var(--line); }
+  .qa:last-child { border-bottom:none; }
+  .qa .q { color:var(--sub); }
+</style>
+</head>
+<body>
+<header id="topbar" hidden>
+  <span class="brand">エミライズ 顧客ボード</span>
+  <a href="#/">予約</a>
+  <a href="#/search">検索</a>
+  <button id="logoutBtn">ログアウト</button>
+</header>
+<main id="app"><div class="empty">読み込み中…</div></main>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const SB_URL = 'https://bbhrcvhvzknsephftsbz.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJiaHJjdmh2emtuc2VwaGZ0c2J6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyMjk5NjEsImV4cCI6MjA5ODgwNTk2MX0.S40aeplTPHGQPdTsqi5krP7-UopEBLDsifx_8m4cD1I';
+const sb = createClient(SB_URL, SB_KEY);
+
+const app = document.getElementById('app');
+const topbar = document.getElementById('topbar');
+document.getElementById('logoutBtn').onclick = async () => { await sb.auth.signOut(); location.hash = ''; render(); };
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+  });
+}
+const TZ = 'Asia/Tokyo';
+function fmtTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', timeZone:TZ });
+}
+function fmtDate(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('ja-JP', { year:'numeric', month:'numeric', day:'numeric', weekday:'short', timeZone:TZ });
+}
+function jstToday() {
+  const p = new Intl.DateTimeFormat('sv-SE', { timeZone:TZ }).format(new Date());
+  return p; // YYYY-MM-DD
+}
+function addDays(dstr, n) {
+  const d = new Date(dstr + 'T00:00:00+09:00');
+  d.setUTCDate(d.getUTCDate() + n);
+  return new Intl.DateTimeFormat('sv-SE', { timeZone:TZ }).format(d);
+}
+const STORE_COLORS = ['#2f6f5f', '#5a67a5', '#b0743a', '#8a5aa5', '#3a7fb0'];
+function storeColor(tag) {
+  let h = 0; const s = String(tag || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return STORE_COLORS[h % STORE_COLORS.length];
+}
+function qaItems(arr) {
+  // profile_fields / questionnaires から {question, answer} を汎用に取り出す
+  const out = [];
+  function walk(x) {
+    if (!x) return;
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    if (typeof x === 'object') {
+      if (x.question) {
+        out.push({ q: x.question, a: (x.answer != null ? x.answer : (x.answers || '')) });
+      }
+      Object.keys(x).forEach(function(k) { if (k !== 'question' && k !== 'answer') walk(x[k]); });
+    }
+  }
+  walk(arr);
+  return out;
+}
+
+// ── ログイン ──────────────────────────────
+function renderLogin(msg) {
+  topbar.hidden = true;
+  app.innerHTML = '<div class="login-wrap"><div class="card">'
+    + '<h2>スタッフログイン</h2>'
+    + (msg ? '<div class="err">' + esc(msg) + '</div>' : '')
+    + '<input id="em" type="email" placeholder="メールアドレス" autocomplete="username">'
+    + '<input id="pw" type="password" placeholder="パスワード" autocomplete="current-password">'
+    + '<button class="btn" id="loginBtn">ログイン</button>'
+    + '</div></div>';
+  document.getElementById('loginBtn').onclick = doLogin;
+  document.getElementById('pw').addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
+}
+async function doLogin() {
+  const em = document.getElementById('em').value.trim();
+  const pw = document.getElementById('pw').value;
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email: em, password: pw });
+  btn.disabled = false;
+  if (error) { renderLogin('ログインできませんでした。メールアドレスとパスワードをご確認ください。'); return; }
+  location.hash = '#/';
+  render();
+}
+
+// ── 日別予約一覧 ──────────────────────────
+async function renderDay(dateStr) {
+  const d = dateStr || jstToday();
+  app.innerHTML = '<div class="empty">読み込み中…</div>';
+  const from = d + 'T00:00:00+09:00';
+  const to = addDays(d, 1) + 'T00:00:00+09:00';
+  const { data, error } = await sb.from('crm_reservations').select('*')
+    .gte('booking_start', from).lt('booking_start', to)
+    .eq('status', 'accepted').order('booking_start');
+  if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
+
+  let html = '<div class="daynav">'
+    + '<button id="prevD">←</button>'
+    + '<input type="date" id="dayPick" value="' + d + '">'
+    + '<button id="nextD">→</button>'
+    + '<button id="todayD">今日</button>'
+    + '</div>';
+  html += '<h2>' + fmtDate(from) + ' の予約 ' + (data.length ? '（' + data.length + '件）' : '') + '</h2>';
+
+  if (!data.length) {
+    html += '<div class="empty">この日の予約はありません</div>';
+  } else {
+    const groups = {};
+    data.forEach(function(r) {
+      const st = (r.staff_names && r.staff_names[0]) || '担当未設定';
+      (groups[st] = groups[st] || []).push(r);
+    });
+    Object.keys(groups).sort().forEach(function(st) {
+      const rows = groups[st];
+      html += '<div class="staff-head">' + esc(st) + ' <span class="cnt">' + rows.length + '件</span></div>';
+      rows.forEach(function(r) {
+        html += '<a class="row" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">'
+          + '<span class="time">' + fmtTime(r.booking_start) + '</span>'
+          + '<span class="cust">' + esc(r.customer_name || '（名前なし）') + '</span>'
+          + '<span class="menu">' + esc(r.menu || '') + '</span>'
+          + '<span class="badge" style="background:' + storeColor(r.store_tag) + '">' + esc(r.store_tag || '') + '</span>'
+          + '</a>';
+      });
+    });
+  }
+  app.innerHTML = html;
+  document.getElementById('prevD').onclick = function() { location.hash = '#/?date=' + addDays(d, -1); };
+  document.getElementById('nextD').onclick = function() { location.hash = '#/?date=' + addDays(d, 1); };
+  document.getElementById('todayD').onclick = function() { location.hash = '#/'; };
+  document.getElementById('dayPick').onchange = function(e) { location.hash = '#/?date=' + e.target.value; };
+}
+
+// ── 顧客プロフィール ──────────────────────
+async function renderCustomer(mid, cid) {
+  app.innerHTML = '<div class="empty">読み込み中…</div>';
+  const nowIso = new Date().toISOString();
+  const [cRes, histRes, karteRes] = await Promise.all([
+    sb.from('crm_customers').select('*').eq('merchant_id', mid).eq('customer_id', cid).maybeSingle(),
+    sb.from('crm_reservations').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('booking_start', { ascending: false }).limit(100),
+    sb.from('crm_karte_notes').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('created_at', { ascending: false }).limit(50),
+  ]);
+  const c = cRes.data;
+  const hist = histRes.data || [];
+  const karte = karteRes.data || [];
+  const name = (c && c.name) || (hist[0] && hist[0].customer_name) || '（不明）';
+
+  let html = '<a class="back" href="#/">← 予約一覧へ</a>';
+
+  // 基本情報
+  html += '<div class="card"><h2>' + esc(name) + (c && c.kana ? ' <small style="color:var(--sub);font-weight:400">' + esc(c.kana) + '</small>' : '') + '</h2>';
+  html += '<dl class="kv">';
+  if (c) {
+    if (c.merchant_name) html += '<dt>店舗</dt><dd>' + esc(c.merchant_name) + '</dd>';
+    if (c.phone) html += '<dt>電話</dt><dd><a href="tel:' + esc(c.phone) + '">' + esc(c.phone) + '</a></dd>';
+    if (c.email) html += '<dt>メール</dt><dd>' + esc(c.email) + '</dd>';
+    if (c.membership_number) html += '<dt>会員番号</dt><dd>' + esc(c.membership_number) + '</dd>';
+    if (c.birthday) html += '<dt>生年月日</dt><dd>' + esc(c.birthday) + '</dd>';
+    if (c.channel) html += '<dt>集客経路</dt><dd>' + esc(c.channel) + '</dd>';
+    if (c.first_reserved_at) html += '<dt>初回予約</dt><dd>' + fmtDate(c.first_reserved_at) + '</dd>';
+  }
+  html += '<dt>来店実績</dt><dd>' + hist.filter(function(r){ return r.booking_start < nowIso && r.status === 'accepted'; }).length + '回</dd>';
+  html += '</dl>';
+
+  // 月謝・回数券
+  const subs = (c && c.subscriptions) || [];
+  const tickets = (c && c.ticket_books) || [];
+  if (subs.length || tickets.length) {
+    html += '<h3>月謝・回数券</h3><div>';
+    subs.forEach(function(s) {
+      const st = s.contract_status === 'active' ? '継続中' : '停止中';
+      html += '<span class="pill' + (s.contract_status === 'active' ? '' : ' warn') + '">' + esc(s.product_name || '月謝') + '｜' + st + '</span>';
+    });
+    tickets.forEach(function(t) {
+      const low = (t.remaining_tickets != null && t.remaining_tickets <= 2);
+      html += '<span class="pill' + (low ? ' warn' : '') + '">' + esc(t.product_name || '回数券')
+        + '｜残' + (t.remaining_tickets != null ? t.remaining_tickets : '?') + '回'
+        + (t.expires_at ? '（' + fmtDate(t.expires_at) + 'まで）' : '') + '</span>';
+    });
+    html += '</div>';
+  }
+
+  // STORESメモ
+  if (c && c.memo) {
+    html += '<h3>STORES顧客メモ</h3><div style="white-space:pre-wrap;font-size:14px">' + esc(c.memo) + '</div>';
+  }
+
+  // アンケート・プロフィール項目
+  const qa = qaItems(c && c.profile_fields).concat(qaItems(hist.slice(0, 3).map(function(r){ return r.questionnaires; })));
+  if (qa.length) {
+    html += '<h3>アンケート・プロフィール</h3>';
+    qa.slice(0, 12).forEach(function(x) {
+      html += '<div class="qa"><span class="q">' + esc(x.q) + '：</span>' + esc(typeof x.a === 'object' ? JSON.stringify(x.a) : x.a) + '</div>';
+    });
+  }
+  html += '</div>';
+
+  // カルテ
+  html += '<div class="card"><h2>カルテ（引き継ぎメモ）</h2>'
+    + '<textarea id="noteText" placeholder="今日の様子・次回の注意点など"></textarea>'
+    + '<div style="text-align:right;margin-top:8px"><button class="btn" id="noteSave">保存</button></div>'
+    + '<div id="noteList">';
+  if (!karte.length) html += '<div class="empty" style="padding:14px 0">まだカルテはありません</div>';
+  karte.forEach(function(n) {
+    html += '<div class="note"><div class="meta">' + esc(n.author_name || '') + '・' + fmtDate(n.created_at) + ' ' + fmtTime(n.created_at) + '</div>'
+      + '<div style="white-space:pre-wrap;font-size:14px">' + esc(n.note) + '</div></div>';
+  });
+  html += '</div></div>';
+
+  // 予約履歴
+  html += '<div class="card"><h2>予約履歴</h2>';
+  if (!hist.length) html += '<div class="empty">履歴がありません</div>';
+  hist.forEach(function(r) {
+    const future = r.booking_start >= nowIso;
+    html += '<div class="hist"><span class="d' + (future ? ' future' : '') + '">' + fmtDate(r.booking_start) + '</span>'
+      + '<span>' + fmtTime(r.booking_start) + '</span>'
+      + '<span style="flex:1">' + esc(r.menu || '') + '</span>'
+      + '<span style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
+      + (future ? '<span class="pill">予定</span>' : '')
+      + '</div>';
+  });
+  html += '</div>';
+
+  app.innerHTML = html;
+
+  document.getElementById('noteSave').onclick = async function() {
+    const txt = document.getElementById('noteText').value.trim();
+    if (!txt) return;
+    this.disabled = true;
+    const { data: sess } = await sb.auth.getUser();
+    const u = sess && sess.user;
+    const authorName = (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '';
+    const { error } = await sb.from('crm_karte_notes').insert({
+      merchant_id: mid, customer_id: Number(cid), note: txt, author_name: authorName,
+    });
+    if (error) { alert('保存できませんでした: ' + error.message); this.disabled = false; return; }
+    renderCustomer(mid, cid);
+  };
+}
+
+// ── 顧客検索 ──────────────────────────────
+async function renderSearch(q) {
+  let html = '<h2>顧客検索</h2><div class="searchbar">'
+    + '<input id="sq" placeholder="名前・カナ・電話番号" value="' + esc(q || '') + '">'
+    + '<button class="btn" id="sBtn">検索</button></div><div id="sRes"></div>';
+  app.innerHTML = html;
+  const go = function() {
+    const v = document.getElementById('sq').value.trim();
+    if (v) { location.hash = '#/search?q=' + encodeURIComponent(v); }
+  };
+  document.getElementById('sBtn').onclick = go;
+  document.getElementById('sq').addEventListener('keydown', function(e) { if (e.key === 'Enter') go(); });
+
+  if (q) {
+    const like = '%' + q + '%';
+    const { data, error } = await sb.from('crm_customers').select('*')
+      .or('name.ilike.' + like + ',kana.ilike.' + like + ',phone.ilike.' + like)
+      .order('last_reserved_at', { ascending: false, nullsFirst: false }).limit(30);
+    const res = document.getElementById('sRes');
+    if (error) { res.innerHTML = '<div class="empty">検索エラー</div>'; return; }
+    if (!data.length) { res.innerHTML = '<div class="empty">見つかりませんでした</div>'; return; }
+    let out = '';
+    data.forEach(function(c) {
+      out += '<a class="row" href="#/c/' + encodeURIComponent(c.merchant_id) + '/' + c.customer_id + '">'
+        + '<span class="cust">' + esc(c.name || '') + '</span>'
+        + '<span class="menu">' + esc(c.kana || '') + '</span>'
+        + '<span class="badge" style="background:' + storeColor((c.merchant_name || '').split(/\s/).pop()) + '">' + esc((c.merchant_name || '').split(/\s/).pop() || '') + '</span>'
+        + '</a>';
+    });
+    res.innerHTML = out;
+  } else {
+    document.getElementById('sq').focus();
+  }
+}
+
+// ── ルーター ──────────────────────────────
+async function render() {
+  const { data } = await sb.auth.getSession();
+  if (!data.session) { renderLogin(); return; }
+  topbar.hidden = false;
+
+  const hash = location.hash || '#/';
+  const m = hash.match(/^#\/c\/([^/]+)\/(\d+)/);
+  if (m) { renderCustomer(decodeURIComponent(m[1]), m[2]); return; }
+  if (hash.indexOf('#/search') === 0) {
+    const q = new URLSearchParams(hash.split('?')[1] || '').get('q') || '';
+    renderSearch(q); return;
+  }
+  const dateQ = new URLSearchParams(hash.split('?')[1] || '').get('date') || '';
+  renderDay(dateQ);
+}
+window.addEventListener('hashchange', render);
+render();
+</script>
+</body>
+</html>
