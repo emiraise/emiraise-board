@@ -8,6 +8,7 @@
   :root { --accent:#2f6f5f; --bg:#f4f6f5; --card:#fff; --line:#e3e8e6; --text:#1f2d2a; --sub:#6b7c77; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; background:var(--bg); color:var(--text); }
+  header[hidden] { display:none; }
   header { position:sticky; top:0; z-index:10; background:var(--accent); color:#fff; padding:10px 14px; display:flex; align-items:center; gap:10px; }
   header .brand { font-weight:700; font-size:15px; margin-right:auto; }
   header button, header a { background:rgba(255,255,255,.15); color:#fff; border:none; border-radius:8px; padding:7px 12px; font-size:13px; text-decoration:none; cursor:pointer; }
