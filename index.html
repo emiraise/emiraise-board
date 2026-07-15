@@ -78,6 +78,18 @@
   .mcell .more { color:var(--sub); }
   .mcell.today { border:2px solid var(--accent); }
   .mcell.blank { background:transparent; border:none; }
+  .rowwrap { display:flex; gap:6px; align-items:stretch; margin-bottom:8px; }
+  .ck { width:42px; border-radius:12px; border:1px solid var(--line); background:#fff; color:#c5cfcb; font-size:17px; cursor:pointer; flex:0 0 42px; }
+  .ck.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .mic { border:1px solid var(--line); background:#fff; border-radius:10px; padding:9px 14px; font-size:14px; cursor:pointer; }
+  .mic.rec { background:#b3261e; color:#fff; border-color:#b3261e; }
+  .rep { width:100%; border-collapse:collapse; font-size:13px; background:#fff; }
+  .rep th, .rep td { border:1px solid var(--line); padding:8px 6px; text-align:right; white-space:nowrap; }
+  .rep th:first-child, .rep td:first-child { text-align:left; position:sticky; left:0; background:#fff; }
+  .rep thead th { background:#eef3f1; text-align:center; }
+  .rep .tot td { font-weight:700; background:#fafcfb; }
+  .bar { height:6px; background:#e8eeec; border-radius:4px; overflow:hidden; margin-top:3px; }
+  .bar span { display:block; height:100%; background:var(--accent); }
 </style>
 </head>
 <body>
@@ -85,6 +97,7 @@
   <span class="brand">エミライズ 顧客ボード</span>
   <a href="#/">予約</a>
   <a href="#/tl">タイムライン</a>
+  <a href="#/report">日報</a>
   <a href="#/search">検索</a>
   <button id="logoutBtn">ログアウト</button>
 </header>
@@ -182,6 +195,7 @@ async function renderDay(dateStr) {
     .gte('booking_start', from).lt('booking_start', to)
     .eq('status', 'accepted').order('booking_start');
   if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
+  const checks = await fetchChecks(d, addDays(d, 1));
 
   let html = '<div class="daynav">'
     + '<button id="prevD">←</button>'
@@ -203,12 +217,15 @@ async function renderDay(dateStr) {
       const rows = groups[st];
       html += '<div class="staff-head">' + esc(st) + ' <span class="cnt">' + rows.length + '件</span></div>';
       rows.forEach(function(r) {
-        html += '<a class="row" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">'
+        const ck = checks[r.reservation_id];
+        html += '<div class="rowwrap">'
+          + '<button class="ck' + (ck ? ' on' : '') + '" data-rid="' + r.reservation_id + '" title="' + (ck ? esc((ck.checked_by_name || '') + ' が確認済み') : '見た印を付ける') + '">✓</button>'
+          + '<a class="row" style="flex:1;margin-bottom:0" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">'
           + '<span class="time">' + fmtTime(r.booking_start) + '</span>'
           + '<span class="cust">' + esc(r.customer_name || '（名前なし）') + '</span>'
           + '<span class="menu">' + esc(r.menu || '') + '</span>'
           + '<span class="badge" style="background:' + storeColor(r.store_tag) + '">' + esc(r.store_tag || '') + '</span>'
-          + '</a>';
+          + '</a></div>';
       });
     });
   }
@@ -217,6 +234,16 @@ async function renderDay(dateStr) {
   document.getElementById('nextD').onclick = function() { location.hash = '#/?date=' + addDays(d, 1); };
   document.getElementById('todayD').onclick = function() { location.hash = '#/'; };
   document.getElementById('dayPick').onchange = function(e) { location.hash = '#/?date=' + e.target.value; };
+  Array.prototype.forEach.call(document.querySelectorAll('.ck'), function(btn) {
+    btn.onclick = async function() {
+      const rid = btn.getAttribute('data-rid');
+      const r = data.find(function(x) { return String(x.reservation_id) === rid; });
+      if (!r) return;
+      btn.disabled = true;
+      await toggleCheck(r, !!checks[r.reservation_id]);
+      renderDay(dateStr);
+    };
+  });
 }
 
 // ── 顧客プロフィール ──────────────────────
@@ -247,7 +274,11 @@ async function renderCustomer(mid, cid) {
     if (c.channel) html += '<dt>集客経路</dt><dd>' + esc(c.channel) + '</dd>';
     if (c.first_reserved_at) html += '<dt>初回予約</dt><dd>' + fmtDate(c.first_reserved_at) + '</dd>';
   }
-  html += '<dt>来店実績</dt><dd>' + hist.filter(function(r){ return r.booking_start < nowIso && r.status === 'accepted'; }).length + '回</dd>';
+  const pastVisits = hist.filter(function(r){ return r.booking_start < nowIso && r.status === 'accepted'; });
+  const totalSpent = hist.reduce(function(a, r){ return a + (r.booking_start < nowIso ? (Number(r.price) || 0) : 0); }, 0);
+  const nextVisit = hist.filter(function(r){ return r.booking_start >= nowIso; }).length;
+  html += '<dt>来店実績</dt><dd>' + pastVisits.length + '回' + (nextVisit ? '（次回で' + (pastVisits.length + 1) + '回目）' : '') + '</dd>';
+  html += '<dt>累計利用額</dt><dd>' + totalSpent.toLocaleString('ja-JP') + '円 <small style="color:var(--sub)">※レッスン料ベース・月謝/回数券払いは0円計上</small></dd>';
   html += '</dl>';
 
   // 月謝・回数券
@@ -285,8 +316,10 @@ async function renderCustomer(mid, cid) {
 
   // カルテ
   html += '<div class="card"><h2>カルテ（引き継ぎメモ）</h2>'
-    + '<textarea id="noteText" placeholder="今日の様子・次回の注意点など"></textarea>'
-    + '<div style="text-align:right;margin-top:8px"><button class="btn" id="noteSave">保存</button></div>'
+    + '<textarea id="noteText" placeholder="今日の様子・次回の注意点など（🎤で音声入力できます）"></textarea>'
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">'
+    + '<button class="mic" id="micBtn">🎤 音声入力</button>'
+    + '<button class="btn" id="noteSave">保存</button></div>'
     + '<div id="noteList">';
   if (!karte.length) html += '<div class="empty" style="padding:14px 0">まだカルテはありません</div>';
   karte.forEach(function(n) {
@@ -310,6 +343,37 @@ async function renderCustomer(mid, cid) {
   html += '</div>';
 
   app.innerHTML = html;
+
+  // 音声入力（対応ブラウザのみ。非対応ならボタンを隠す＝キーボードのマイクで代用可）
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const micBtn = document.getElementById('micBtn');
+  if (!SR) {
+    micBtn.style.display = 'none';
+  } else {
+    let recog = null;
+    micBtn.onclick = function() {
+      if (recog) { recog.stop(); return; }
+      recog = new SR();
+      recog.lang = 'ja-JP';
+      recog.interimResults = false;
+      recog.continuous = true;
+      micBtn.classList.add('rec');
+      micBtn.textContent = '⏹ 停止';
+      recog.onresult = function(e) {
+        let t = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript;
+        const ta = document.getElementById('noteText');
+        ta.value = (ta.value ? ta.value + ' ' : '') + t;
+      };
+      recog.onend = function() {
+        recog = null;
+        micBtn.classList.remove('rec');
+        micBtn.textContent = '🎤 音声入力';
+      };
+      recog.onerror = recog.onend;
+      recog.start();
+    };
+  }
 
   document.getElementById('noteSave').onclick = async function() {
     const txt = document.getElementById('noteText').value.trim();
@@ -383,6 +447,28 @@ async function fetchRange(fromDate, toDateExcl) {
     .lt('booking_start', toDateExcl + 'T00:00:00+09:00')
     .eq('status', 'accepted').order('booking_start').limit(2000);
 }
+// ── 見た印（対応済みチェック） ─────────────
+async function fetchChecks(fromDate, toDateExcl) {
+  const { data } = await sb.from('crm_reservation_checks').select('*')
+    .gte('booking_start', fromDate + 'T00:00:00+09:00')
+    .lt('booking_start', toDateExcl + 'T00:00:00+09:00').limit(2000);
+  const map = {};
+  (data || []).forEach(function(c) { map[c.reservation_id] = c; });
+  return map;
+}
+async function toggleCheck(r, isChecked) {
+  if (isChecked) {
+    await sb.from('crm_reservation_checks').delete().eq('reservation_id', r.reservation_id);
+  } else {
+    const { data: sess } = await sb.auth.getUser();
+    const u = sess && sess.user;
+    const nm = (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '';
+    await sb.from('crm_reservation_checks').insert({
+      reservation_id: r.reservation_id, booking_start: r.booking_start, checked_by_name: nm,
+    });
+  }
+}
+
 let MY_STAFF = null;
 async function myStaffName() {
   if (MY_STAFF !== null) return MY_STAFF;
@@ -408,7 +494,7 @@ function tlHeadHtml() {
   }
   return h + '</div></div>';
 }
-function tlBlocksHtml(rows) {
+function tlBlocksHtml(rows, checks) {
   let h = '';
   rows.forEach(function(r) {
     let s = minsOf(r.booking_start);
@@ -418,10 +504,11 @@ function tlBlocksHtml(rows) {
     if (e <= TL_START || s >= TL_END) return;
     const left = (s - TL_START) / TL_TOTAL * 100;
     const width = (e - s) / TL_TOTAL * 100;
-    h += '<a class="tlblock" style="left:' + left + '%;width:' + width + '%;background:' + storeColor(r.store_tag) + '"'
+    const done = checks && checks[r.reservation_id] ? '✓' : '';
+    h += '<a class="tlblock" style="left:' + left + '%;width:' + width + '%;background:' + storeColor(r.store_tag) + (done ? ';opacity:.75' : '') + '"'
       + ' href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '"'
       + ' title="' + esc(fmtTime(r.booking_start) + ' ' + (r.customer_name || '') + ' / ' + (r.menu || '') + '【' + (r.store_tag || '') + '】') + '">'
-      + esc(r.customer_name || '予約') + '</a>';
+      + done + esc(r.customer_name || '予約') + '</a>';
   });
   return h;
 }
@@ -443,6 +530,7 @@ async function renderTimeline(params) {
   if (mode === 'day') {
     const { data, error } = await fetchRange(date, addDays(date, 1));
     if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
+    const dayChecks = await fetchChecks(date, addDays(date, 1));
     const storeSel = params.get('store') || '';
     const stores = {};
     data.forEach(function(r) { if (r.store_tag) stores[r.store_tag] = true; });
@@ -455,6 +543,7 @@ async function renderTimeline(params) {
       + '<button id="tlNext">→</button>'
       + '<button id="tlToday">今日</button>'
       + '<span style="font-weight:700">' + fmtMD(date) + '　' + rows.length + '件</span>'
+      + '<a href="https://coubic.com/dashboard" target="_blank" rel="noopener" style="margin-left:auto;color:var(--accent);font-size:13px;text-decoration:none">＋STORESで予約登録</a>'
       + '</div>';
     html += '<div class="chips"><a class="' + (storeSel ? '' : 'on') + '" href="' + tlHash('day', { date: date }) + '">全店</a>';
     Object.keys(stores).sort().forEach(function(st) {
@@ -468,7 +557,7 @@ async function renderTimeline(params) {
     } else {
       html += '<div class="tlwrap"><div class="tl">' + tlHeadHtml();
       staffs.forEach(function(st) {
-        html += '<div class="tlrow"><div class="tlname">' + esc(st) + '</div><div class="tltrack">' + tlBlocksHtml(byStaff(rows, st)) + '</div></div>';
+        html += '<div class="tlrow"><div class="tlname">' + esc(st) + '</div><div class="tltrack">' + tlBlocksHtml(byStaff(rows, st), dayChecks) + '</div></div>';
       });
       html += '</div></div>';
     }
@@ -574,6 +663,114 @@ async function renderTimeline(params) {
   document.getElementById('tlNext').onclick = function() { location.hash = tlHash('month', { ym: nextFirst.slice(0, 7), staff: staff }); };
 }
 
+// ── 日報・集計（スタッフ別の件数・対応済み・稼働・埋まり率・売上） ──
+function durMins(r) {
+  const s = minsOf(r.booking_start);
+  let e = r.booking_end ? minsOf(r.booking_end) : s + 50;
+  if (e <= s) e = s + 50;
+  return e - s;
+}
+async function renderReport(params) {
+  const range = params.get('range') || 'day';
+  const today = jstToday();
+  const date = params.get('date') || today;
+  app.innerHTML = '<div class="empty">読み込み中…</div>';
+
+  let from, toExcl, label, prevD, nextD;
+  if (range === 'day') {
+    from = date; toExcl = addDays(date, 1); label = fmtMD(date);
+    prevD = addDays(date, -1); nextD = addDays(date, 1);
+  } else if (range === 'week') {
+    from = weekStart(date); toExcl = addDays(from, 7);
+    label = fmtMD(from) + '〜' + fmtMD(addDays(from, 6));
+    prevD = addDays(from, -7); nextD = addDays(from, 7);
+  } else {
+    const ym = date.slice(0, 7);
+    from = ym + '-01';
+    const dim = new Date(parseInt(ym.slice(0, 5), 10), parseInt(ym.slice(5, 7), 10), 0).getDate();
+    toExcl = addDays(ym + '-' + String(dim).padStart(2, '0'), 1);
+    label = parseInt(ym.slice(0, 5), 10) + '年' + parseInt(ym.slice(5, 7), 10) + '月';
+    prevD = addDays(from, -1).slice(0, 7) + '-01'; nextD = toExcl;
+  }
+  const daysN = Math.max(1, Math.round((new Date(toExcl + 'T00:00:00+09:00') - new Date(from + 'T00:00:00+09:00')) / 86400000));
+
+  const [resQ, checks, karteQ] = await Promise.all([
+    fetchRange(from, toExcl),
+    fetchChecks(from, toExcl),
+    sb.from('crm_karte_notes').select('author_name, created_at')
+      .gte('created_at', from + 'T00:00:00+09:00').lt('created_at', toExcl + 'T00:00:00+09:00').limit(2000),
+  ]);
+  if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
+  const rows = resQ.data || [];
+
+  const agg = {};
+  rows.forEach(function(r) {
+    const st = resStaffs(r)[0];
+    const a = (agg[st] = agg[st] || { count: 0, done: 0, mins: 0, rev: 0 });
+    a.count++;
+    if (checks[r.reservation_id]) a.done++;
+    a.mins += durMins(r);
+    a.rev += Number(r.price) || 0;
+  });
+  const karteBy = {};
+  (karteQ.data || []).forEach(function(n) {
+    const nm = n.author_name || '（無記名）';
+    karteBy[nm] = (karteBy[nm] || 0) + 1;
+  });
+
+  const cap = daysN * 720; // 9:00〜21:00 = 12h/日 基準
+  function hrs(m) { return (Math.round(m / 6) / 10) + 'h'; }
+
+  let html = '<div class="tabs">'
+    + '<a class="' + (range === 'day' ? 'on' : '') + '" href="#/report?range=day&date=' + date + '">日</a>'
+    + '<a class="' + (range === 'week' ? 'on' : '') + '" href="#/report?range=week&date=' + date + '">週</a>'
+    + '<a class="' + (range === 'month' ? 'on' : '') + '" href="#/report?range=month&date=' + date + '">月</a>'
+    + '</div>';
+  html += '<div class="selbar">'
+    + '<button id="rpPrev">←</button>'
+    + '<span style="font-weight:700;font-size:15px">' + label + '</span>'
+    + '<button id="rpNext">→</button>'
+    + '<span style="color:var(--sub)">全' + rows.length + '件</span>'
+    + '</div>';
+
+  if (!rows.length) {
+    html += '<div class="empty">この期間の予約はありません</div>';
+  } else {
+    let tc = 0, td = 0, tm = 0, tr = 0;
+    html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
+      + '<th>スタッフ</th><th>件数</th><th>✓済み</th><th>稼働</th><th>埋まり率</th><th>売上</th></tr></thead><tbody>';
+    Object.keys(agg).sort().forEach(function(st) {
+      const a = agg[st];
+      tc += a.count; td += a.done; tm += a.mins; tr += a.rev;
+      const rate = Math.round(a.mins / cap * 100);
+      html += '<tr><td>' + esc(st) + '</td><td>' + a.count + '</td>'
+        + '<td>' + a.done + '/' + a.count + '</td>'
+        + '<td>' + hrs(a.mins) + '</td>'
+        + '<td>' + rate + '%<div class="bar"><span style="width:' + Math.min(rate, 100) + '%"></span></div></td>'
+        + '<td>' + a.rev.toLocaleString('ja-JP') + '円</td></tr>';
+    });
+    html += '<tr class="tot"><td>合計</td><td>' + tc + '</td><td>' + td + '/' + tc + '</td>'
+      + '<td>' + hrs(tm) + '</td><td>-</td><td>' + tr.toLocaleString('ja-JP') + '円</td></tr>';
+    html += '</tbody></table></div>';
+    html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">※埋まり率は営業12h（9:00〜21:00）×' + daysN + '日を100%とした目安。売上はレッスン料ベース（月謝・回数券払いは0円計上）</div>';
+  }
+
+  html += '<div class="card" style="margin-top:12px"><h2>📝 カルテ記入</h2>';
+  const kNames = Object.keys(karteBy);
+  if (!kNames.length) {
+    html += '<div class="empty" style="padding:10px 0">この期間のカルテ記入はまだありません</div>';
+  } else {
+    kNames.sort().forEach(function(nm) {
+      html += '<div class="hist"><span style="flex:1">' + esc(nm) + '</span><span>' + karteBy[nm] + '件</span></div>';
+    });
+  }
+  html += '</div>';
+
+  app.innerHTML = html;
+  document.getElementById('rpPrev').onclick = function() { location.hash = '#/report?range=' + range + '&date=' + prevD; };
+  document.getElementById('rpNext').onclick = function() { location.hash = '#/report?range=' + range + '&date=' + nextD; };
+}
+
 // ── ルーター ──────────────────────────────
 async function render() {
   const { data } = await sb.auth.getSession();
@@ -585,6 +782,10 @@ async function render() {
   if (m) { renderCustomer(decodeURIComponent(m[1]), m[2]); return; }
   if (hash.indexOf('#/tl') === 0) {
     renderTimeline(new URLSearchParams(hash.split('?')[1] || ''));
+    return;
+  }
+  if (hash.indexOf('#/report') === 0) {
+    renderReport(new URLSearchParams(hash.split('?')[1] || ''));
     return;
   }
   if (hash.indexOf('#/search') === 0) {
