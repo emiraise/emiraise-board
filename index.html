@@ -85,6 +85,8 @@
   .tlname.sun { color:#b3261e; }
   .tbform { display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:13px; }
   .tbform select, .tbform input { border:1px solid var(--line); border-radius:8px; padding:7px; font-size:13px; background:#fff; }
+  .pcols { columns: 2 460px; column-gap:12px; }
+  .pcols .card { break-inside: avoid; }
   .tagbtn { padding:6px 12px; border:1px solid var(--line); border-radius:999px; background:#fff; font-size:12px; cursor:pointer; margin:0 6px 6px 0; }
   .tagbtn.on { background:var(--accent); color:#fff; border-color:var(--accent); }
   .tagbtn.warn.on { background:#b3261e; border-color:#b3261e; }
@@ -266,19 +268,21 @@ async function renderDay(dateStr) {
 async function renderCustomer(mid, cid) {
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const nowIso = new Date().toISOString();
-  const [cRes, histRes, karteRes, lbRes] = await Promise.all([
+  const [cRes, histRes, karteRes, lbRes, exRes] = await Promise.all([
     sb.from('crm_customers').select('*').eq('merchant_id', mid).eq('customer_id', cid).maybeSingle(),
     sb.from('crm_reservations').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('booking_start', { ascending: false }).limit(100),
     sb.from('crm_karte_notes').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('created_at', { ascending: false }).limit(50),
     sb.from('crm_customer_labels').select('*').eq('merchant_id', mid).eq('customer_id', cid).maybeSingle(),
+    sb.from('crm_exercise_notes').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('created_at', { ascending: false }).limit(100),
   ]);
   const c = cRes.data;
   const hist = histRes.data || [];
   const karte = karteRes.data || [];
   const lb = lbRes.data;
+  const exNotes = exRes.data || [];
   const name = (c && c.name) || (hist[0] && hist[0].customer_name) || '（不明）';
 
-  let html = '<a class="back" href="#/">← 予約一覧へ</a>';
+  let html = '<a class="back" href="#/">← 予約一覧へ</a><div class="pcols">';
 
   // 基本情報
   html += '<div class="card"><h2>' + esc(name) + (c && c.kana ? ' <small style="color:var(--sub);font-weight:400">' + esc(c.kana) + '</small>' : '') + '</h2>';
@@ -302,6 +306,7 @@ async function renderCustomer(mid, cid) {
   }
   if (lb && lb.next_action) html += '<div class="nx" style="font-size:14px;margin:4px 0">📌 次回: ' + esc(lb.next_action) + '</div>';
   if (lb && lb.personality) html += '<div style="font-size:13px;color:var(--sub);margin:4px 0">💬 ' + esc(lb.personality) + '</div>';
+  if (lb && lb.profile_note) html += '<div style="font-size:13px;color:var(--sub);margin:4px 0;white-space:pre-wrap">👤 ' + esc(lb.profile_note) + '</div>';
   if (lb && lb.goal_tags && lb.goal_tags.length) html += '<div style="font-size:13px;margin:4px 0">🎯 ' + esc(lb.goal_tags.join('・')) + '</div>';
 
   html += '<dl class="kv">';
@@ -370,8 +375,37 @@ async function renderCustomer(mid, cid) {
   });
   html += '</div><h3>💬 接し方メモ（性格・好み）</h3>'
     + '<input id="lbPers" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px" placeholder="例: おしゃべり好き・褒めると伸びる / 静かに集中したい派" value="' + esc((lb && lb.personality) || '') + '">'
-    + '<div style="text-align:right;margin-top:10px"><button class="btn" id="lbSave">ラベルを保存</button></div>'
+    + '<h3>👤 人物メモ（仕事・家族・趣味など — 引き継ぎ・ロールプレイ用）</h3>'
+    + '<textarea id="lbProf" placeholder="例: 事務職でデスクワーク長め / 小学生の子2人 / 趣味はゴルフ / 自分からはあまり話さない（🎤で音声入力）">' + esc((lb && lb.profile_note) || '') + '</textarea>'
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button class="mic" id="lbProfMic">🎤 音声入力</button><button class="btn" id="lbSave">ラベルを保存</button></div>'
     + '</div>';
+
+  // エクササイズの気づき（代償・苦手パターン。引き継ぎ&将来のAI提案の基盤）
+  const exNameSet = {};
+  exNotes.forEach(function(n) { exNameSet[n.exercise] = 1; });
+  ['ダウンストレッチ', 'ハンドレッド', 'ロールアップ', 'スワン', 'エレファント', 'フットワーク', 'ショルダーブリッジ', 'ティーザー'].forEach(function(n) { exNameSet[n] = 1; });
+  html += '<div class="card"><h2>🏃 エクササイズの気づき（代償・苦手）</h2>'
+    + '<div style="display:flex;gap:8px;margin-bottom:6px">'
+    + '<input id="exName" list="exList" placeholder="エクササイズ名" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px">'
+    + '<datalist id="exList">';
+  Object.keys(exNameSet).sort().forEach(function(n) { html += '<option value="' + esc(n) + '">'; });
+  html += '</datalist></div>'
+    + '<textarea id="exObs" placeholder="例: 肩が上がってしまい腹筋に力が入らない・腕で頑張ってしまう（🎤で音声入力）"></textarea>'
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button class="mic" id="exMic">🎤 音声入力</button><button class="btn" id="exSave">記録</button></div>';
+  if (!exNotes.length) {
+    html += '<div class="empty" style="padding:10px 0">まだ記録はありません</div>';
+  } else {
+    const grouped = {};
+    exNotes.forEach(function(n) { (grouped[n.exercise] = grouped[n.exercise] || []).push(n); });
+    Object.keys(grouped).forEach(function(ex) {
+      html += '<h3>' + esc(ex) + '（' + grouped[ex].length + '件）</h3>';
+      grouped[ex].forEach(function(n) {
+        html += '<div class="note"><div class="meta">' + esc(n.author_name || '') + '・' + fmtDate(n.created_at) + '</div>'
+          + '<div style="white-space:pre-wrap;font-size:14px">' + esc(n.observation) + '</div></div>';
+      });
+    });
+  }
+  html += '</div>';
 
   // カルテ
   html += '<div class="card"><h2>カルテ（引き継ぎメモ）</h2>'
@@ -399,7 +433,7 @@ async function renderCustomer(mid, cid) {
       + (future ? '<span class="pill">予定</span>' : '')
       + '</div>';
   });
-  html += '</div>';
+  html += '</div></div>';  // 予約履歴カード + pcols（2列レイアウト）を閉じる
 
   app.innerHTML = html;
 
@@ -425,6 +459,7 @@ async function renderCustomer(mid, cid) {
       body_tags: bodySel,
       goal_tags: goalSel,
       personality: document.getElementById('lbPers').value.trim() || null,
+      profile_note: document.getElementById('lbProf').value.trim() || null,
       next_action: document.getElementById('lbNext').value.trim() || null,
       updated_by_name: (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '',
       updated_at: new Date().toISOString(),
@@ -434,35 +469,54 @@ async function renderCustomer(mid, cid) {
   };
 
   // 音声入力（対応ブラウザのみ。非対応ならボタンを隠す＝キーボードのマイクで代用可）
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const micBtn = document.getElementById('micBtn');
-  if (!SR) {
-    micBtn.style.display = 'none';
-  } else {
+  function attachMic(btnId, targetId) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    if (!SR) { btn.style.display = 'none'; return; }
     let recog = null;
-    micBtn.onclick = function() {
+    btn.onclick = function() {
       if (recog) { recog.stop(); return; }
       recog = new SR();
       recog.lang = 'ja-JP';
       recog.interimResults = false;
       recog.continuous = true;
-      micBtn.classList.add('rec');
-      micBtn.textContent = '⏹ 停止';
+      btn.classList.add('rec');
+      btn.textContent = '⏹ 停止';
       recog.onresult = function(e) {
         let t = '';
         for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript;
-        const ta = document.getElementById('noteText');
+        const ta = document.getElementById(targetId);
         ta.value = (ta.value ? ta.value + ' ' : '') + t;
       };
       recog.onend = function() {
         recog = null;
-        micBtn.classList.remove('rec');
-        micBtn.textContent = '🎤 音声入力';
+        btn.classList.remove('rec');
+        btn.textContent = '🎤 音声入力';
       };
       recog.onerror = recog.onend;
       recog.start();
     };
   }
+  attachMic('micBtn', 'noteText');
+  attachMic('exMic', 'exObs');
+  attachMic('lbProfMic', 'lbProf');
+
+  // エクササイズの気づきを記録
+  document.getElementById('exSave').onclick = async function() {
+    const ex = document.getElementById('exName').value.trim();
+    const obs = document.getElementById('exObs').value.trim();
+    if (!ex || !obs) { alert('エクササイズ名と気づきの両方を入れてください'); return; }
+    this.disabled = true;
+    const { data: sess } = await sb.auth.getUser();
+    const u = sess && sess.user;
+    const { error } = await sb.from('crm_exercise_notes').insert({
+      merchant_id: mid, customer_id: Number(cid), exercise: ex, observation: obs,
+      author_name: (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '',
+    });
+    if (error) { alert('保存できませんでした: ' + error.message); this.disabled = false; return; }
+    renderCustomer(mid, cid);
+  };
 
   document.getElementById('noteSave').onclick = async function() {
     const txt = document.getElementById('noteText').value.trim();
