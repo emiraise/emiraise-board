@@ -12,6 +12,7 @@
   header { position:sticky; top:0; z-index:10; background:var(--accent); color:#fff; padding:10px 14px; display:flex; align-items:center; gap:10px; }
   header .brand { font-weight:700; font-size:15px; margin-right:auto; }
   header button, header a { background:rgba(255,255,255,.15); color:#fff; border:none; border-radius:8px; padding:7px 12px; font-size:13px; text-decoration:none; cursor:pointer; }
+  header a.on { background:#fff; color:var(--accent); font-weight:700; }
   main { max-width:none; margin:0 auto; padding:14px 18px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
   h2 { font-size:16px; margin:6px 2px 10px; }
@@ -67,6 +68,12 @@
   .tlrow { display:flex; align-items:stretch; border-top:1px solid var(--line); }
   .tlname { flex:0 0 98px; position:sticky; left:0; background:#fff; z-index:2; font-size:13px; font-weight:700; padding:10px 6px 0; border-right:1px solid var(--line); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .tlname.me { color:var(--accent); }
+  .shtag { font-size:10px; font-weight:400; color:var(--sub); margin-top:2px; white-space:normal; line-height:1.3; }
+  .shtag.off { color:#b3261e; }
+  .shtag.oth { color:#5a67a5; }
+  .shoff { position:absolute; top:0; bottom:0; z-index:0; background:repeating-linear-gradient(45deg, #efece6 0 8px, #e7e3da 8px 16px); color:#8a8375; font-size:11px; padding:4px 6px; overflow:hidden; white-space:nowrap; }
+  .shoff.oth { background:repeating-linear-gradient(45deg, #e8ebf5 0 8px, #dfe3f2 8px 16px); color:#5a67a5; }
+  .tlday { padding:6px 10px; background:#e7eeeb; font-weight:700; font-size:12.5px; border-top:2px solid #cdd6d2; position:sticky; left:0; }
   .tltrack { position:relative; flex:1; height:88px; background-image:repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px 8%); }
   .tlhead .tltrack { height:22px; background:none; }
   .tlhour { position:absolute; top:4px; font-size:10px; color:var(--sub); padding-left:3px; }
@@ -683,17 +690,24 @@ async function fetchCustMeta(rows) {
   });
   const out = { labels: {}, stats: {}, handovers: {} };
   if (!ids.length) return out;
-  const [lq, sq, hq] = await Promise.all([
-    sb.from('crm_customer_labels').select('*').in('customer_id', ids),
-    sb.from('crm_customer_stats').select('*').in('customer_id', ids),
-    sb.from('crm_handover_notes').select('merchant_id,customer_id,to_staff').eq('done', false).in('customer_id', ids),
-  ]);
-  (lq.data || []).forEach(function(x) { out.labels[custKey(x.merchant_id, x.customer_id)] = x; });
-  (sq.data || []).forEach(function(x) { out.stats[custKey(x.merchant_id, x.customer_id)] = x; });
-  (hq.data || []).forEach(function(x) {
-    const k = custKey(x.merchant_id, x.customer_id);
-    (out.handovers[k] = out.handovers[k] || []).push(x);
+  // URL長制限対策: 150件ずつに分割して取得
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 150) chunks.push(ids.slice(i, i + 150));
+  const jobs = [];
+  chunks.forEach(function(ch) {
+    jobs.push(sb.from('crm_customer_labels').select('*').in('customer_id', ch));
+    jobs.push(sb.from('crm_customer_stats').select('*').in('customer_id', ch));
+    jobs.push(sb.from('crm_handover_notes').select('merchant_id,customer_id,to_staff').eq('done', false).in('customer_id', ch));
   });
+  const results = await Promise.all(jobs);
+  for (let i = 0; i < results.length; i += 3) {
+    (results[i].data || []).forEach(function(x) { out.labels[custKey(x.merchant_id, x.customer_id)] = x; });
+    (results[i + 1].data || []).forEach(function(x) { out.stats[custKey(x.merchant_id, x.customer_id)] = x; });
+    (results[i + 2].data || []).forEach(function(x) {
+      const k = custKey(x.merchant_id, x.customer_id);
+      (out.handovers[k] = out.handovers[k] || []).push(x);
+    });
+  }
   return out;
 }
 function rowBadges(r, meta) {
@@ -739,6 +753,53 @@ function ticketAlerts(ticketBooks) {
     }
   });
   return out;
+}
+
+// ── シフト（Googleドライブのシフト表から取り込み済みデータ） ──
+async function fetchShifts(fromDate, toDateExcl) {
+  const { data } = await sb.from('crm_shifts').select('*')
+    .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
+  return data || [];
+}
+let SHIFT_CODES = null;
+async function shiftCodes() {
+  if (SHIFT_CODES) return SHIFT_CODES;
+  const { data } = await sb.from('crm_shift_codes').select('*');
+  SHIFT_CODES = {};
+  (data || []).forEach(function(c) { SHIFT_CODES[c.code] = c; });
+  return SHIFT_CODES;
+}
+function shiftFor(shifts, staffName, dateStr) {
+  return shifts.find(function(s) { return nw(s.staff_name) === nw(staffName) && s.date === dateStr; });
+}
+function shiftTagHtml(sh, codes) {
+  if (!sh) return '';
+  if (sh.kind === 'off') return '<div class="shtag off">' + esc(sh.label || '休み') + '</div>';
+  if (sh.kind === 'other') return '<div class="shtag oth">' + esc(sh.label || '') + '</div>';
+  let t = '出勤';
+  if (sh.code) {
+    const c = codes[sh.code];
+    t = sh.code + (c && c.start_time ? ' ' + c.start_time + '-' + c.end_time : '');
+  }
+  return '<div class="shtag">' + esc(t + (sh.store ? '【' + sh.store + '】' : '')) + '</div>';
+}
+function shiftShadeHtml(sh, codes) {
+  if (!sh) return '';
+  if (sh.kind === 'off') return '<div class="shoff" style="left:0;width:100%">' + esc(sh.label || '休み') + '</div>';
+  if (sh.kind === 'other') return '<div class="shoff oth" style="left:0;width:100%">' + esc(sh.label || '') + '</div>';
+  const c = sh.code ? codes[sh.code] : null;
+  if (!c || !c.start_time) return '';
+  const s = Math.max(hm2m(c.start_time), TL_START);
+  const e = Math.min(hm2m(c.end_time), TL_END);
+  let h = '';
+  if (s > TL_START) h += '<div class="shoff" style="left:0;width:' + ((s - TL_START) / TL_TOTAL * 100) + '%"></div>';
+  if (e < TL_END) h += '<div class="shoff" style="left:' + ((e - TL_START) / TL_TOTAL * 100) + '%;width:' + ((TL_END - e) / TL_TOTAL * 100) + '%"></div>';
+  return h;
+}
+function shiftStaffs(shifts, dateStr) {
+  const s = {};
+  shifts.forEach(function(x) { if (x.date === dateStr && x.kind === 'work') s[x.staff_name] = true; });
+  return Object.keys(s);
 }
 
 // ── 休み・ブロック枠（ボード側管理。STORES APIはシフト/ブロックを提供しない） ──
@@ -913,6 +974,8 @@ async function renderTimeline(params) {
     const dayChecks = await fetchChecks(date, addDays(date, 1));
     const dayBlocks = await fetchBlocks(date, addDays(date, 1));
     const dayMeta = await fetchCustMeta(data);
+    const dayShifts = await fetchShifts(date, addDays(date, 1));
+    const codes = await shiftCodes();
     const storeSel = params.get('store') || '';
     const stores = {};
     data.forEach(function(r) { if (r.store_tag) stores[r.store_tag] = true; });
@@ -940,6 +1003,10 @@ async function renderTimeline(params) {
     html += '</div>';
 
     let staffs = unionStaffs(rows, dayBlocks);
+    // シフト上「出勤」なのに予約ゼロのスタッフも行を出す（空きが見えるように）
+    shiftStaffs(dayShifts, date).forEach(function(sn) {
+      if (!staffs.some(function(x) { return nw(x) === nw(sn); })) staffs.push(sn);
+    });
     // ログイン本人の行を最上部に
     staffs.sort(function(a, b) {
       const am = nw(a) === nw(mineName) ? 0 : 1;
@@ -954,11 +1021,14 @@ async function renderTimeline(params) {
       html += '<div class="tlwrap"><div class="tl">' + tlHeadHtml();
       staffs.forEach(function(st) {
         const me = nw(st) === nw(mineName) ? ' me' : '';
-        html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + '</div><div class="tltrack">'
+        const sh = shiftFor(dayShifts, st, date);
+        html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + shiftTagHtml(sh, codes) + '</div><div class="tltrack">'
+          + shiftShadeHtml(sh, codes)
           + tbBlocksHtml(blocksFor(dayBlocks, st, date))
           + tlBlocksHtml(byStaff(rows, st), dayChecks, dayMeta) + '</div></div>';
       });
       html += '</div></div>';
+      html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">斜線＝シフト表の休み・シフト外/会議など（シフト表から取込）。グレー斜線ブロック＝ボードで登録した休み/ブロック</div>';
     }
     app.innerHTML = html;
     const rerenderDay = function() { renderTimeline(params); };
@@ -993,8 +1063,9 @@ async function renderTimeline(params) {
       nextKey = { ym: addDays(last, 1).slice(0, 7), staff: staff, date: date };
     }
     const endExcl = addDays(start, daysN);
-    const [resQ, checks, blocks] = await Promise.all([
+    const [resQ, checks, blocks, shifts, codes] = await Promise.all([
       fetchRange(start, endExcl), fetchChecks(start, endExcl), fetchBlocks(start, endExcl),
+      fetchShifts(start, endExcl), shiftCodes(),
     ]);
     if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
     const data = resQ.data || [];
@@ -1004,9 +1075,10 @@ async function renderTimeline(params) {
       const mine = await myStaffName();
       staff = staffs.find(function(n) { return nw(n) === nw(mine); }) || staffs[0] || '';
     }
-    const rows = byStaff(data, staff);
+    const allMode = staff === '*';
+    const rows = allMode ? data : byStaff(data, staff);
     const dayMap = {};
-    rows.forEach(function(r) {
+    data.forEach(function(r) {
       const d = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start));
       (dayMap[d] = dayMap[d] || []).push(r);
     });
@@ -1021,24 +1093,51 @@ async function renderTimeline(params) {
       + '<button id="tbToggle">＋休み/ブロック</button>'
       + '<a href="https://coubic.com/dashboard" target="_blank" rel="noopener" style="margin-left:auto;color:var(--accent);font-size:13px;text-decoration:none">＋STORESで予約登録</a>'
       + '</div>';
-    html += blockFormHtml(staffs, staff, (today >= start && today < endExcl) ? today : start);
+    html += blockFormHtml(staffs, allMode ? '' : staff, (today >= start && today < endExcl) ? today : start);
     html += '<div class="tlwrap"><div class="tl">' + tlHeadHtml();
     for (let i = 0; i < daysN; i++) {
       const d = addDays(start, i);
-      html += '<div class="tlrow"' + (i % 7 === 0 && i > 0 ? ' style="border-top:2px solid #cdd6d2"' : '') + '>'
-        + '<div class="tlname' + dayNameCls(d, today) + '">' + fmtMD(d) + '</div>'
-        + '<div class="tltrack">'
-        + tbBlocksHtml(blocksFor(blocks, staff, d))
-        + tlBlocksHtml(dayMap[d] || [], checks, wkMeta)
-        + '</div></div>';
+      const dayRows = dayMap[d] || [];
+      if (allMode) {
+        // 全スタッフ: 日付見出し + その日のスタッフ行を縦に積む（ワンモア管理画面風）
+        html += '<div class="tlday' + (d === today ? '" style="color:var(--accent)' : '') + '">' + fmtMD(d) + '　<span style="font-weight:400;color:var(--sub)">' + dayRows.length + '件</span></div>';
+        let ds = staffSet(dayRows);
+        shiftStaffs(shifts, d).forEach(function(sn) {
+          if (!ds.some(function(x) { return nw(x) === nw(sn); })) ds.push(sn);
+        });
+        ds.sort();
+        if (!ds.length) {
+          html += '<div class="tlrow"><div class="tlname" style="color:var(--sub);font-weight:400">—</div><div class="tltrack"></div></div>';
+        }
+        ds.forEach(function(st) {
+          const sh = shiftFor(shifts, st, d);
+          html += '<div class="tlrow"><div class="tlname">' + esc(st) + shiftTagHtml(sh, codes) + '</div><div class="tltrack">'
+            + shiftShadeHtml(sh, codes)
+            + tbBlocksHtml(blocksFor(blocks, st, d))
+            + tlBlocksHtml(byStaff(dayRows, st), checks, wkMeta)
+            + '</div></div>';
+        });
+      } else {
+        const sh = shiftFor(shifts, staff, d);
+        html += '<div class="tlrow"' + (i % 7 === 0 && i > 0 ? ' style="border-top:2px solid #cdd6d2"' : '') + '>'
+          + '<div class="tlname' + dayNameCls(d, today) + '">' + fmtMD(d) + shiftTagHtml(sh, codes) + '</div>'
+          + '<div class="tltrack">'
+          + shiftShadeHtml(sh, codes)
+          + tbBlocksHtml(blocksFor(blocks, staff, d))
+          + tlBlocksHtml(byStaff(dayRows, staff), checks, wkMeta)
+          + '</div></div>';
+      }
     }
     html += '</div></div>';
     app.innerHTML = html;
 
     const sel = document.getElementById('tlStaff');
+    const oAll = document.createElement('option');
+    oAll.value = '*'; oAll.textContent = '全スタッフ'; if (allMode) oAll.selected = true;
+    sel.appendChild(oAll);
     staffs.forEach(function(n) {
       const o = document.createElement('option');
-      o.value = n; o.textContent = n; if (nw(n) === nw(staff)) o.selected = true;
+      o.value = n; o.textContent = n; if (!allMode && nw(n) === nw(staff)) o.selected = true;
       sel.appendChild(o);
     });
     const keyBase = mode === 'week' ? { date: date } : { ym: (params.get('ym') || date.slice(0, 7)), date: date };
@@ -1325,6 +1424,17 @@ async function render() {
   topbar.hidden = false;
 
   const hash = location.hash || '#/';
+  // 選択中のメニューを強調（顧客ページは「予約」扱い）
+  Array.prototype.forEach.call(topbar.querySelectorAll('a'), function(a) {
+    const href = a.getAttribute('href');
+    let on;
+    if (href === '#/') {
+      on = hash === '#/' || hash.indexOf('#/?') === 0 || hash.indexOf('#/c/') === 0;
+    } else {
+      on = hash.indexOf(href) === 0;
+    }
+    a.classList.toggle('on', on);
+  });
   const m = hash.match(/^#\/c\/([^/]+)\/(\d+)/);
   if (m) { renderCustomer(decodeURIComponent(m[1]), m[2]); return; }
   if (hash.indexOf('#/tl') === 0) {
