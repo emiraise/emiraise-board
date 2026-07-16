@@ -65,11 +65,14 @@
   .tl { min-width:1000px; position:relative; }
   .tlhead { display:flex; height:22px; }
   .tlrow { display:flex; align-items:stretch; border-top:1px solid var(--line); }
-  .tlname { flex:0 0 86px; position:sticky; left:0; background:#fff; z-index:2; font-size:12px; font-weight:700; padding:12px 6px 0; border-right:1px solid var(--line); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .tltrack { position:relative; flex:1; height:42px; background-image:repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px 8%); }
+  .tlname { flex:0 0 98px; position:sticky; left:0; background:#fff; z-index:2; font-size:13px; font-weight:700; padding:10px 6px 0; border-right:1px solid var(--line); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tlname.me { color:var(--accent); }
+  .tltrack { position:relative; flex:1; height:88px; background-image:repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px 8%); }
   .tlhead .tltrack { height:22px; background:none; }
   .tlhour { position:absolute; top:4px; font-size:10px; color:var(--sub); padding-left:3px; }
-  .tlblock { position:absolute; top:5px; height:32px; border-radius:6px; color:#fff; font-size:11px; line-height:32px; padding:0 5px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; text-decoration:none; min-width:20px; box-shadow:0 1px 2px rgba(0,0,0,.15); }
+  .tlblock { position:absolute; top:5px; height:78px; border-radius:8px; color:#fff; font-size:12px; line-height:1.3; padding:5px 7px; overflow:hidden; text-decoration:none; min-width:24px; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+  .tlblock .tlb-n { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tlblock .tlb-t { font-size:10.5px; opacity:.92; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .mgrid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
   .mwd { text-align:center; font-size:11px; color:var(--sub); padding:2px 0; }
   .mcell { display:block; background:#fff; border:1px solid var(--line); border-radius:8px; min-height:74px; padding:4px; font-size:10.5px; overflow:hidden; text-decoration:none; color:inherit; }
@@ -268,18 +271,22 @@ async function renderDay(dateStr) {
 async function renderCustomer(mid, cid) {
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const nowIso = new Date().toISOString();
-  const [cRes, histRes, karteRes, lbRes, exRes] = await Promise.all([
+  const [cRes, histRes, karteRes, lbRes, exRes, hoRes, poolRes] = await Promise.all([
     sb.from('crm_customers').select('*').eq('merchant_id', mid).eq('customer_id', cid).maybeSingle(),
     sb.from('crm_reservations').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('booking_start', { ascending: false }).limit(100),
     sb.from('crm_karte_notes').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('created_at', { ascending: false }).limit(50),
     sb.from('crm_customer_labels').select('*').eq('merchant_id', mid).eq('customer_id', cid).maybeSingle(),
     sb.from('crm_exercise_notes').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('created_at', { ascending: false }).limit(100),
+    sb.from('crm_handover_notes').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('created_at', { ascending: false }).limit(30),
+    fetchRange(jstToday(), addDays(jstToday(), 14)),
   ]);
   const c = cRes.data;
   const hist = histRes.data || [];
   const karte = karteRes.data || [];
   const lb = lbRes.data;
   const exNotes = exRes.data || [];
+  const handovers = hoRes.data || [];
+  const staffPool = staffSet((poolRes && poolRes.data) || []);
   const name = (c && c.name) || (hist[0] && hist[0].customer_name) || '（不明）';
 
   let html = '<a class="back" href="#/">← 予約一覧へ</a><div class="pcols">';
@@ -359,10 +366,33 @@ async function renderCustomer(mid, cid) {
   }
   html += '</div>';
 
-  // ラベル・申し送り（②③④）
+  // 📮 申し送り（次の担当者へ・宛先指定＋済みチェック＋鮮度表示）
+  html += '<div class="card"><h2>📮 申し送り（次の担当者へ）</h2>'
+    + '<div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">'
+    + '<span style="font-size:13px;color:var(--sub)">宛先</span>'
+    + '<select id="hoTo" style="border:1px solid var(--line);border-radius:10px;padding:9px;font-size:14px;background:#fff"><option>全員</option>';
+  staffPool.forEach(function(n) { html += '<option>' + esc(n) + '</option>'; });
+  html += '</select></div>'
+    + '<textarea id="hoNote" placeholder="例: 次回担当の方へ。前回腰に張りあり、強度は控えめから様子見てください（🎤で音声入力）"></textarea>'
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button class="mic" id="hoMic">🎤 音声入力</button><button class="btn" id="hoSave">送る</button></div>';
+  const hoOpen = handovers.filter(function(n) { return !n.done; });
+  const hoDone = handovers.filter(function(n) { return n.done; });
+  if (!handovers.length) html += '<div class="empty" style="padding:10px 0">申し送りはありません</div>';
+  hoOpen.forEach(function(n) {
+    html += '<div class="note"><div class="meta">➡️ <b>' + esc(n.to_staff) + '</b> さんへ｜' + esc(n.author_name || '') + '・<b>' + fmtAgo(n.created_at) + '</b></div>'
+      + '<div style="white-space:pre-wrap;font-size:14px">' + esc(n.note) + '</div>'
+      + '<div style="text-align:right;margin-top:4px"><button class="tagbtn" data-hodone="' + n.id + '">✅ 対応済みにする</button></div></div>';
+  });
+  hoDone.slice(0, 5).forEach(function(n) {
+    html += '<div class="note" style="opacity:.55"><div class="meta">✅済（' + esc(n.done_by || '') + '）｜➡️' + esc(n.to_staff) + '｜' + esc(n.author_name || '') + '・' + fmtAgo(n.created_at) + '</div>'
+      + '<div style="white-space:pre-wrap;font-size:13px">' + esc(n.note) + '</div></div>';
+  });
+  html += '</div>';
+
+  // ラベル（タグ・メモ類）
   const bodyNow = (lb && lb.body_tags) || [];
   const goalNow = (lb && lb.goal_tags) || [];
-  html += '<div class="card"><h2>🏷 ラベル・申し送り</h2>'
+  html += '<div class="card"><h2>🏷 ラベル</h2>'
     + '<h3>📌 次回アクション（当日の予約一覧・タイムラインに表示）</h3>'
     + '<input id="lbNext" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px" placeholder="例: 腰の様子を聞く / 回数券の案内をする" value="' + esc((lb && lb.next_action) || '') + '">'
     + '<h3>⚠️ 身体の注意</h3><div>';
@@ -400,7 +430,7 @@ async function renderCustomer(mid, cid) {
     Object.keys(grouped).forEach(function(ex) {
       html += '<h3>' + esc(ex) + '（' + grouped[ex].length + '件）</h3>';
       grouped[ex].forEach(function(n) {
-        html += '<div class="note"><div class="meta">' + esc(n.author_name || '') + '・' + fmtDate(n.created_at) + '</div>'
+        html += '<div class="note"><div class="meta">' + esc(n.author_name || '') + '・<b>' + fmtAgo(n.created_at) + '</b></div>'
           + '<div style="white-space:pre-wrap;font-size:14px">' + esc(n.observation) + '</div></div>';
       });
     });
@@ -416,7 +446,7 @@ async function renderCustomer(mid, cid) {
     + '<div id="noteList">';
   if (!karte.length) html += '<div class="empty" style="padding:14px 0">まだカルテはありません</div>';
   karte.forEach(function(n) {
-    html += '<div class="note"><div class="meta">' + esc(n.author_name || '') + '・' + fmtDate(n.created_at) + ' ' + fmtTime(n.created_at) + '</div>'
+    html += '<div class="note"><div class="meta">' + esc(n.author_name || '') + '・<b>' + fmtAgo(n.created_at) + '</b></div>'
       + '<div style="white-space:pre-wrap;font-size:14px">' + esc(n.note) + '</div></div>';
   });
   html += '</div></div>';
@@ -501,6 +531,35 @@ async function renderCustomer(mid, cid) {
   attachMic('micBtn', 'noteText');
   attachMic('exMic', 'exObs');
   attachMic('lbProfMic', 'lbProf');
+  attachMic('hoMic', 'hoNote');
+
+  // 申し送りの送信・済み処理
+  document.getElementById('hoSave').onclick = async function() {
+    const note = document.getElementById('hoNote').value.trim();
+    if (!note) return;
+    this.disabled = true;
+    const { data: sess } = await sb.auth.getUser();
+    const u = sess && sess.user;
+    const { error } = await sb.from('crm_handover_notes').insert({
+      merchant_id: mid, customer_id: Number(cid),
+      to_staff: document.getElementById('hoTo').value,
+      note: note,
+      author_name: (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '',
+    });
+    if (error) { alert('送れませんでした: ' + error.message); this.disabled = false; return; }
+    renderCustomer(mid, cid);
+  };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-hodone]'), function(btn) {
+    btn.onclick = async function() {
+      btn.disabled = true;
+      const { data: sess } = await sb.auth.getUser();
+      const u = sess && sess.user;
+      const nm = (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '';
+      await sb.from('crm_handover_notes').update({ done: true, done_by: nm, done_at: new Date().toISOString() })
+        .eq('id', btn.getAttribute('data-hodone'));
+      renderCustomer(mid, cid);
+    };
+  });
 
   // エクササイズの気づきを記録
   document.getElementById('exSave').onclick = async function() {
@@ -622,14 +681,19 @@ async function fetchCustMeta(rows) {
   rows.forEach(function(r) {
     if (r.customer_id && !seen[r.customer_id]) { seen[r.customer_id] = 1; ids.push(r.customer_id); }
   });
-  const out = { labels: {}, stats: {} };
+  const out = { labels: {}, stats: {}, handovers: {} };
   if (!ids.length) return out;
-  const [lq, sq] = await Promise.all([
+  const [lq, sq, hq] = await Promise.all([
     sb.from('crm_customer_labels').select('*').in('customer_id', ids),
     sb.from('crm_customer_stats').select('*').in('customer_id', ids),
+    sb.from('crm_handover_notes').select('merchant_id,customer_id,to_staff').eq('done', false).in('customer_id', ids),
   ]);
   (lq.data || []).forEach(function(x) { out.labels[custKey(x.merchant_id, x.customer_id)] = x; });
   (sq.data || []).forEach(function(x) { out.stats[custKey(x.merchant_id, x.customer_id)] = x; });
+  (hq.data || []).forEach(function(x) {
+    const k = custKey(x.merchant_id, x.customer_id);
+    (out.handovers[k] = out.handovers[k] || []).push(x);
+  });
   return out;
 }
 function rowBadges(r, meta) {
@@ -640,6 +704,7 @@ function rowBadges(r, meta) {
   if (st && st.past_visits < 3) b += '🆕';
   if (lb && lb.body_tags && lb.body_tags.length) b += '⚠️';
   if (lb && lb.next_action) b += '📌';
+  if (meta.handovers && meta.handovers[k] && meta.handovers[k].length) b += '📮';
   return b;
 }
 function rowNextAction(r, meta) {
@@ -805,12 +870,27 @@ function tlBlocksHtml(rows, checks, meta) {
     const done = checks && checks[r.reservation_id] ? '✓' : '';
     const badges = meta ? rowBadges(r, meta) : '';
     const nx = meta ? rowNextAction(r, meta) : '';
-    h += '<a class="tlblock" style="left:' + left + '%;width:' + width + '%;background:' + storeColor(r.store_tag) + (done ? ';opacity:.75' : '') + '"'
+    const timeStr = fmtTime(r.booking_start) + (r.booking_end ? '-' + fmtTime(r.booking_end) : '');
+    h += '<a class="tlblock" style="left:' + left + '%;width:' + width + '%;background:' + storeColor(r.store_tag) + (done ? ';opacity:.72' : '') + '"'
       + ' href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '"'
-      + ' title="' + esc(fmtTime(r.booking_start) + ' ' + (r.customer_name || '') + ' / ' + (r.menu || '') + '【' + (r.store_tag || '') + '】' + (nx ? ' 📌' + nx : '')) + '">'
-      + done + badges + esc(r.customer_name || '予約') + '</a>';
+      + ' title="' + esc(timeStr + ' ' + (r.customer_name || '') + ' / ' + (r.menu || '') + '【' + (r.store_tag || '') + '】' + (nx ? ' 📌' + nx : '')) + '">'
+      + '<div class="tlb-n">' + done + badges + esc(r.customer_name || '予約') + '</div>'
+      + '<div class="tlb-t">' + esc(timeStr) + '</div>'
+      + '<div class="tlb-t">' + esc(nx ? '📌' + nx : (r.menu || '')) + '</div>'
+      + '</a>';
   });
   return h;
+}
+function fmtAgo(iso) {
+  // 「今日 14:02」「昨日」「3日前（7/13）」— 情報の鮮度が一目で分かる表記
+  if (!iso) return '';
+  const d = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(iso));
+  const today = jstToday();
+  const diff = Math.round((new Date(today + 'T12:00:00+09:00') - new Date(d + 'T12:00:00+09:00')) / 86400000);
+  const md = parseInt(d.slice(5, 7), 10) + '/' + parseInt(d.slice(8, 10), 10);
+  if (diff <= 0) return '今日 ' + fmtTime(iso);
+  if (diff === 1) return '昨日（' + md + '）';
+  return diff + '日前（' + md + '）';
 }
 function tlTabsHtml(mode, date, staff) {
   const ym = date.slice(0, 7);
@@ -848,20 +928,33 @@ async function renderTimeline(params) {
       + '<button id="tbToggle">＋休み/ブロック</button>'
       + '<a href="https://coubic.com/dashboard" target="_blank" rel="noopener" style="margin-left:auto;color:var(--accent);font-size:13px;text-decoration:none">＋STORESで予約登録</a>'
       + '</div>';
-    html += '<div class="chips"><a class="' + (storeSel ? '' : 'on') + '" href="' + tlHash('day', { date: date }) + '">全店</a>';
+    const mineName = await myStaffName();
+    const mineOnly = params.get('mine') === '1';
+    html += '<div class="chips"><a class="' + (storeSel || mineOnly ? '' : 'on') + '" href="' + tlHash('day', { date: date }) + '">全店</a>';
     Object.keys(stores).sort().forEach(function(st) {
       html += '<a class="' + (storeSel === st ? 'on' : '') + '" href="' + tlHash('day', { date: date, store: st }) + '">' + esc(st) + '</a>';
     });
+    if (mineName) {
+      html += '<a class="' + (mineOnly ? 'on' : '') + '" href="' + tlHash('day', mineOnly ? { date: date } : { date: date, mine: '1' }) + '">👤 自分のみ</a>';
+    }
     html += '</div>';
 
-    const staffs = unionStaffs(rows, dayBlocks);
+    let staffs = unionStaffs(rows, dayBlocks);
+    // ログイン本人の行を最上部に
+    staffs.sort(function(a, b) {
+      const am = nw(a) === nw(mineName) ? 0 : 1;
+      const bm = nw(b) === nw(mineName) ? 0 : 1;
+      return am - bm || a.localeCompare(b);
+    });
+    if (mineOnly) staffs = staffs.filter(function(st) { return nw(st) === nw(mineName); });
     html += blockFormHtml(staffs, staffs[0] || '', date);
     if (!staffs.length) {
       html += '<div class="empty">この日の予約はありません</div>';
     } else {
       html += '<div class="tlwrap"><div class="tl">' + tlHeadHtml();
       staffs.forEach(function(st) {
-        html += '<div class="tlrow"><div class="tlname">' + esc(st) + '</div><div class="tltrack">'
+        const me = nw(st) === nw(mineName) ? ' me' : '';
+        html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + '</div><div class="tltrack">'
           + tbBlocksHtml(blocksFor(dayBlocks, st, date))
           + tlBlocksHtml(byStaff(rows, st), dayChecks, dayMeta) + '</div></div>';
       });
