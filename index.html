@@ -797,8 +797,9 @@ function shiftShadeHtml(sh, codes) {
   return h;
 }
 function shiftStaffs(shifts, dateStr) {
+  // その日にシフト行がある人全員（休み・会議の人も行を出して見える化する）
   const s = {};
-  shifts.forEach(function(x) { if (x.date === dateStr && x.kind === 'work') s[x.staff_name] = true; });
+  shifts.forEach(function(x) { if (!dateStr || x.date === dateStr) s[x.staff_name] = true; });
   return Object.keys(s);
 }
 
@@ -1071,6 +1072,11 @@ async function renderTimeline(params) {
     const data = resQ.data || [];
     const wkMeta = await fetchCustMeta(data);
     const staffs = unionStaffs(data, blocks);
+    // シフト表に載っている人（大地さん等・予約ゼロでも）を選択肢に含める
+    shiftStaffs(shifts, null).forEach(function(sn) {
+      if (!staffs.some(function(x) { return nw(x) === nw(sn); })) staffs.push(sn);
+    });
+    staffs.sort();
     if (!staff) {
       const mine = await myStaffName();
       staff = staffs.find(function(n) { return nw(n) === nw(mine); }) || staffs[0] || '';
