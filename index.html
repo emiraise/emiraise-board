@@ -308,12 +308,37 @@ async function renderCustomer(mid, cid) {
     fetchRange(jstToday(), addDays(jstToday(), 14)),
   ]);
   const c = cRes.data;
-  const hist = histRes.data || [];
-  const karte = karteRes.data || [];
+  let hist = histRes.data || [];
+  let karte = karteRes.data || [];
   const lb = lbRes.data;
   const exNotes = exRes.data || [];
   const handovers = hoRes.data || [];
   const staffPool = staffSet((poolRes && poolRes.data) || []);
+
+  // 名寄せ: 他店舗に同じお客様（電話番号一致・なければ氏名一致）がいれば履歴・カルテを統合
+  let linked = [];
+  if (c && (c.phone || c.name)) {
+    let lq = sb.from('crm_customers').select('merchant_id,customer_id,merchant_name,name,phone');
+    lq = c.phone ? lq.eq('phone', c.phone) : lq.eq('name', c.name);
+    const { data: cand } = await lq.limit(10);
+    linked = (cand || []).filter(function(x) {
+      return !(x.merchant_id === mid && String(x.customer_id) === String(cid));
+    });
+  }
+  if (linked.length) {
+    const jobs = [];
+    linked.forEach(function(x) {
+      jobs.push(sb.from('crm_reservations').select('*').eq('merchant_id', x.merchant_id).eq('customer_id', x.customer_id).order('booking_start', { ascending: false }).limit(100));
+      jobs.push(sb.from('crm_karte_notes').select('*').eq('merchant_id', x.merchant_id).eq('customer_id', x.customer_id).order('created_at', { ascending: false }).limit(50));
+    });
+    const rs = await Promise.all(jobs);
+    for (let i = 0; i < rs.length; i += 2) {
+      hist = hist.concat(rs[i].data || []);
+      karte = karte.concat(rs[i + 1].data || []);
+    }
+    hist.sort(function(a, b) { return a.booking_start < b.booking_start ? 1 : -1; });
+    karte.sort(function(a, b) { return a.created_at < b.created_at ? 1 : -1; });
+  }
   const name = (c && c.name) || (hist[0] && hist[0].customer_name) || '（不明）';
 
   let html = '<a class="back" href="#/">← 予約一覧へ</a><div class="pcols">';
@@ -337,6 +362,13 @@ async function renderCustomer(mid, cid) {
     html += '<div class="alertrow">';
     alerts.forEach(function(a) { html += '<span class="pill' + (a.cls ? ' ' + a.cls : '') + '">' + esc(a.text) + '</span>'; });
     html += '</div>';
+  }
+  if (linked.length) {
+    html += '<div style="font-size:12px;margin:4px 0">🔗 他店舗にも登録: ';
+    html += linked.map(function(x) {
+      return '<a style="color:var(--accent)" href="#/c/' + encodeURIComponent(x.merchant_id) + '/' + x.customer_id + '">' + esc((x.merchant_name || '').split(/[\s　]/).pop() || '') + '</a>';
+    }).join('・');
+    html += '（来店実績・履歴・カルテは全店舗を統合表示中）</div>';
   }
   if (lb && lb.next_action) html += '<div class="nx" style="font-size:14px;margin:4px 0">📌 次回: ' + esc(lb.next_action) + '</div>';
   if (lb && lb.personality) html += '<div style="font-size:13px;color:var(--sub);margin:4px 0">💬 ' + esc(lb.personality) + '</div>';
@@ -486,6 +518,7 @@ async function renderCustomer(mid, cid) {
     html += '<div class="hist"><span class="d' + (future ? ' future' : '') + '">' + fmtDate(r.booking_start) + '</span>'
       + '<span>' + fmtTime(r.booking_start) + '</span>'
       + '<span style="flex:1">' + esc(r.menu || '') + '</span>'
+      + '<span class="badge" style="background:' + storeColor(r.store_tag) + ';font-size:10px">' + esc(r.store_tag || '') + '</span>'
       + '<span style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
       + (future ? '<span class="pill">予定</span>' : '')
       + '</div>';
