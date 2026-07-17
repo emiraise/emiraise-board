@@ -839,9 +839,10 @@ function tbBlocksHtml(blocks) {
       left = (s - TL_START) / TL_TOTAL * 100;
       width = (e - s) / TL_TOTAL * 100;
     }
+    const reasonText = b.reason + (b.note ? '・' + b.note : '');
     h += '<div class="tbblk" data-bid="' + b.id + '" style="left:' + left + '%;width:' + width + '%"'
-      + ' title="タップで削除: ' + esc(b.reason + ' （登録: ' + (b.created_by_name || '') + '）') + '">'
-      + esc(b.reason) + (b.start_time ? '' : '（終日）') + '</div>';
+      + ' title="タップで削除: ' + esc(reasonText + ' （登録: ' + (b.created_by_name || '') + '）') + '">'
+      + esc(reasonText) + (b.start_time ? '' : '（終日）') + '</div>';
   });
   return h;
 }
@@ -873,7 +874,8 @@ function blockFormHtml(staffs, selStaff, dateVal) {
     + '<input type="date" id="tbDate" value="' + dateVal + '">'
     + '<label><input type="checkbox" id="tbAll"> 終日</label>'
     + '<input type="time" id="tbFrom" value="09:00">〜<input type="time" id="tbTo" value="21:00">'
-    + '<select id="tbReason"><option>休み</option><option>ブロック</option><option>休憩</option><option>研修</option></select>'
+    + '<select id="tbReason"><option>ブロック</option><option>休み</option><option>休憩</option><option>研修</option><option>ミーティング</option></select>'
+    + '<input id="tbNote" placeholder="理由・補足（例: 器具メンテ / 通院）" style="flex:1;min-width:160px">'
     + '<button class="btn" id="tbAdd">追加</button>'
     + '</div>';
 }
@@ -896,6 +898,7 @@ function wireBlockForm(rerender) {
       start_time: all ? null : document.getElementById('tbFrom').value,
       end_time: all ? null : document.getElementById('tbTo').value,
       reason: document.getElementById('tbReason').value,
+      note: document.getElementById('tbNote').value.trim() || null,
       created_by_name: (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '',
     };
     if (!payload.staff_name || !payload.date) return;
