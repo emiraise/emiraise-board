@@ -772,6 +772,12 @@ async function shiftCodes() {
 function shiftFor(shifts, staffName, dateStr) {
   return shifts.find(function(s) { return nw(s.staff_name) === nw(staffName) && s.date === dateStr; });
 }
+function codeTimes(c) {
+  if (!c || !c.start_time) return '';
+  let t = c.start_time + '-' + c.end_time;
+  if (c.start2) t += '/' + c.start2 + '-' + c.end2;
+  return t;
+}
 function shiftTagHtml(sh, codes) {
   if (!sh) return '';
   if (sh.kind === 'off') return '<div class="shtag off">' + esc(sh.label || '休み') + '</div>';
@@ -779,9 +785,13 @@ function shiftTagHtml(sh, codes) {
   let t = '出勤';
   if (sh.code) {
     const c = codes[sh.code];
-    t = sh.code + (c && c.start_time ? ' ' + c.start_time + '-' + c.end_time : '');
+    const times = codeTimes(c);
+    t = sh.code + (times ? ' ' + times : '');
   }
   return '<div class="shtag">' + esc(t + (sh.store ? '【' + sh.store + '】' : '')) + '</div>';
+}
+function _shoffDiv(a, b) {
+  return '<div class="shoff" style="left:' + ((a - TL_START) / TL_TOTAL * 100) + '%;width:' + ((b - a) / TL_TOTAL * 100) + '%"></div>';
 }
 function shiftShadeHtml(sh, codes) {
   if (!sh) return '';
@@ -789,11 +799,19 @@ function shiftShadeHtml(sh, codes) {
   if (sh.kind === 'other') return '<div class="shoff oth" style="left:0;width:100%">' + esc(sh.label || '') + '</div>';
   const c = sh.code ? codes[sh.code] : null;
   if (!c || !c.start_time) return '';
-  const s = Math.max(hm2m(c.start_time), TL_START);
-  const e = Math.min(hm2m(c.end_time), TL_END);
+  // 勤務区間（中抜けシフトは2区間）の外側を斜線で塗る
+  const segs = [[hm2m(c.start_time), hm2m(c.end_time)]];
+  if (c.start2) segs.push([hm2m(c.start2), hm2m(c.end2)]);
+  segs.sort(function(x, y) { return x[0] - y[0]; });
   let h = '';
-  if (s > TL_START) h += '<div class="shoff" style="left:0;width:' + ((s - TL_START) / TL_TOTAL * 100) + '%"></div>';
-  if (e < TL_END) h += '<div class="shoff" style="left:' + ((e - TL_START) / TL_TOTAL * 100) + '%;width:' + ((TL_END - e) / TL_TOTAL * 100) + '%"></div>';
+  let cur = TL_START;
+  segs.forEach(function(sg) {
+    const s = Math.max(sg[0], TL_START);
+    const e = Math.min(sg[1], TL_END);
+    if (s > cur) h += _shoffDiv(cur, s);
+    cur = Math.max(cur, e);
+  });
+  if (cur < TL_END) h += _shoffDiv(cur, TL_END);
   return h;
 }
 function shiftStaffs(shifts, dateStr) {
