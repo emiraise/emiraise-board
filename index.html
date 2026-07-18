@@ -76,6 +76,9 @@
   .shtag.oth { color:#5a67a5; }
   .shoff { position:absolute; top:0; bottom:0; z-index:0; background:repeating-linear-gradient(45deg, #efece6 0 8px, #e7e3da 8px 16px); color:#8a8375; font-size:11px; padding:4px 6px; overflow:hidden; white-space:nowrap; }
   .shoff.oth { background:repeating-linear-gradient(45deg, #e8ebf5 0 8px, #dfe3f2 8px 16px); color:#5a67a5; }
+  .shoff.offday { display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:800; letter-spacing:.2em; color:#b3261e;
+    background:repeating-linear-gradient(45deg, #f8e7e7 0 10px, #f3dbdb 10px 20px); }
+  .chips a.offchip { background:#fdecec; border-color:#f0c9c9; color:#b3261e; pointer-events:none; }
   .tlday { padding:6px 10px; background:#e7eeeb; font-weight:700; font-size:12.5px; border-top:2px solid #cdd6d2; position:sticky; left:0; }
   .tltrack { position:relative; flex:1; height:88px; background-image:repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px 8%); }
   .tlhead .tltrack { height:22px; background:none; }
@@ -247,13 +250,14 @@ async function renderDay(dateStr) {
   if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
   const checks = await fetchChecks(d, addDays(d, 1));
   const meta = await fetchCustMeta(data);
-  // 当日カルテを書いたお客様（📝マーク用）
+  // 当日カルテを書いたお客様（📝マーク用）と当日のシフト（休みチップ用）
   const karteToday = {};
   {
     const kt = await sb.from('crm_karte_notes').select('merchant_id,customer_id')
       .gte('created_at', from).lt('created_at', to).limit(500);
     (kt.data || []).forEach(function(x) { karteToday[custKey(x.merchant_id, x.customer_id)] = true; });
   }
+  const dayShiftsL = await fetchShifts(d, addDays(d, 1));
 
   let html = '<div class="daynav">'
     + '<button id="prevD">←</button>'
@@ -279,6 +283,10 @@ async function renderDay(dateStr) {
       const kd = groups[st].filter(function(r) { return karteToday[custKey(r.merchant_id, r.customer_id)]; }).length;
       const full = kd >= groups[st].length ? ' ✅' : '';
       html += '<a style="pointer-events:none">' + esc(st) + ' ' + groups[st].length + '件（✓' + done + '・📝' + kd + '/' + groups[st].length + '）' + full + '</a>';
+    });
+    // 今日休みのスタッフを赤チップで表示
+    dayShiftsL.filter(function(s) { return s.kind === 'off'; }).forEach(function(s) {
+      html += '<a class="offchip">🌙 ' + esc(s.staff_name) + ' ' + esc(s.label || '休み') + '</a>';
     });
     html += '</div><div class="listcols">';
     gnames.forEach(function(st) {
@@ -874,7 +882,7 @@ function _shoffDiv(a, b) {
 }
 function shiftShadeHtml(sh, codes) {
   if (!sh) return '';
-  if (sh.kind === 'off') return '<div class="shoff" style="left:0;width:100%">' + esc(sh.label || '休み') + '</div>';
+  if (sh.kind === 'off') return '<div class="shoff offday" style="left:0;width:100%">🌙 ' + esc(sh.label || '休み') + '</div>';
   if (sh.kind === 'other') return '<div class="shoff oth" style="left:0;width:100%">' + esc(sh.label || '') + '</div>';
   const c = sh.code ? codes[sh.code] : null;
   if (!c || !c.start_time) return '';
@@ -1309,25 +1317,32 @@ async function renderReport(params) {
   const [resQ, checks, karteQ] = await Promise.all([
     fetchRange(from, toExcl),
     fetchChecks(from, toExcl),
-    sb.from('crm_karte_notes').select('author_name, created_at')
+    sb.from('crm_karte_notes').select('merchant_id, customer_id, author_name, created_at')
       .gte('created_at', from + 'T00:00:00+09:00').lt('created_at', toExcl + 'T00:00:00+09:00').limit(2000),
   ]);
   if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
   const rows = resQ.data || [];
 
-  const agg = {};
-  rows.forEach(function(r) {
-    const st = resStaffs(r)[0];
-    const a = (agg[st] = agg[st] || { count: 0, done: 0, mins: 0, rev: 0 });
-    a.count++;
-    if (checks[r.reservation_id]) a.done++;
-    a.mins += durMins(r);
-    a.rev += Number(r.price) || 0;
-  });
+  // 「顧客×日」でその日にカルテが書かれたかを判定できるようにする
+  const karteSet = {};
   const karteBy = {};
   (karteQ.data || []).forEach(function(n) {
     const nm = n.author_name || '（無記名）';
     karteBy[nm] = (karteBy[nm] || 0) + 1;
+    const kd = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(n.created_at));
+    karteSet[n.merchant_id + '|' + n.customer_id + '|' + kd] = true;
+  });
+
+  const agg = {};
+  rows.forEach(function(r) {
+    const st = resStaffs(r)[0];
+    const a = (agg[st] = agg[st] || { count: 0, done: 0, mins: 0, rev: 0, kd: 0 });
+    a.count++;
+    if (checks[r.reservation_id]) a.done++;
+    const rd = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start));
+    if (karteSet[r.merchant_id + '|' + r.customer_id + '|' + rd]) a.kd++;
+    a.mins += durMins(r);
+    a.rev += Number(r.price) || 0;
   });
 
   const cap = daysN * 720; // 9:00〜21:00 = 12h/日 基準
@@ -1348,23 +1363,29 @@ async function renderReport(params) {
   if (!rows.length) {
     html += '<div class="empty">この期間の予約はありません</div>';
   } else {
-    let tc = 0, td = 0, tm = 0, tr = 0;
+    let tc = 0, td = 0, tm = 0, tr = 0, tk = 0;
     html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
-      + '<th>スタッフ</th><th>件数</th><th>✓済み</th><th>稼働</th><th>埋まり率</th><th>売上</th></tr></thead><tbody>';
+      + '<th>スタッフ</th><th>件数</th><th>✓済み</th><th>📝カルテ</th><th>記入率</th><th>稼働</th><th>埋まり率</th><th>売上</th></tr></thead><tbody>';
     Object.keys(agg).sort().forEach(function(st) {
       const a = agg[st];
-      tc += a.count; td += a.done; tm += a.mins; tr += a.rev;
+      tc += a.count; td += a.done; tm += a.mins; tr += a.rev; tk += a.kd;
       const rate = Math.round(a.mins / cap * 100);
+      const krate = a.count ? Math.round(a.kd / a.count * 100) : 0;
+      const kcolor = krate >= 100 ? 'var(--accent)' : (krate >= 80 ? '#b0743a' : '#b3261e');
       html += '<tr><td>' + esc(st) + '</td><td>' + a.count + '</td>'
         + '<td>' + a.done + '/' + a.count + '</td>'
+        + '<td>' + a.kd + '/' + a.count + (krate >= 100 ? ' ✅' : '') + '</td>'
+        + '<td style="color:' + kcolor + ';font-weight:700">' + krate + '%<div class="bar"><span style="width:' + Math.min(krate, 100) + '%;background:' + kcolor + '"></span></div></td>'
         + '<td>' + hrs(a.mins) + '</td>'
         + '<td>' + rate + '%<div class="bar"><span style="width:' + Math.min(rate, 100) + '%"></span></div></td>'
         + '<td>' + a.rev.toLocaleString('ja-JP') + '円</td></tr>';
     });
+    const tkrate = tc ? Math.round(tk / tc * 100) : 0;
     html += '<tr class="tot"><td>合計</td><td>' + tc + '</td><td>' + td + '/' + tc + '</td>'
+      + '<td>' + tk + '/' + tc + '</td><td>' + tkrate + '%</td>'
       + '<td>' + hrs(tm) + '</td><td>-</td><td>' + tr.toLocaleString('ja-JP') + '円</td></tr>';
     html += '</tbody></table></div>';
-    html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">※埋まり率は営業12h（9:00〜21:00）×' + daysN + '日を100%とした目安。売上はレッスン料ベース（月謝・回数券払いは0円計上）</div>';
+    html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">※📝カルテ＝担当したお客様のうち当日カルテを書けた件数（記入率は査定の参考指標。月表示にすると月次の集計になります）。埋まり率は営業12h×' + daysN + '日基準。売上はレッスン料ベース（月謝・回数券払いは0円計上）</div>';
   }
 
   html += '<div class="card" style="margin-top:12px"><h2>📝 カルテ記入</h2>';
