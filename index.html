@@ -40,6 +40,9 @@
   .hist:last-child { border-bottom:none; }
   .hist .d { min-width:104px; font-variant-numeric:tabular-nums; }
   .hist .future { color:var(--accent); font-weight:700; }
+  .hist .seq { min-width:44px; font-weight:800; color:var(--accent); font-variant-numeric:tabular-nums; }
+  .mhead { font-weight:800; font-size:13px; margin:12px 0 4px; padding:6px 10px; border-radius:10px; background:#dde6e0; color:#26443a; }
+  .mhead.warn { background:#f4dede; color:#b3261e; }
   .note { border-bottom:1px solid var(--line); padding:10px 2px; }
   .note:last-child { border-bottom:none; }
   .note .meta { font-size:11px; color:var(--sub); margin-bottom:3px; }
@@ -575,12 +578,38 @@ async function renderCustomer(mid, cid) {
   });
   html += '</div></div>';
 
-  // 予約履歴
-  html += '<div class="card"><h2>予約履歴</h2>';
+  // 予約履歴（月ごとにグループ化して「◯回目」と「月N回コースの充足」を表示）
+  const quotaN = c ? subQuota(c.subscriptions) : 0;
+  html += '<div class="card"><h2>予約履歴' + (quotaN ? '　<small style="color:var(--sub);font-weight:400">月' + quotaN + '回コース</small>' : '') + '</h2>';
   if (!hist.length) html += '<div class="empty">履歴がありません</div>';
+  // 月ごとの通し番号（古い順で1回目・2回目…と数える）
+  const seqMap = {};
+  const byMonth = {};
+  hist.slice().sort(function(a, b) { return a.booking_start < b.booking_start ? -1 : 1; }).forEach(function(r) {
+    const ym2 = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start)).slice(0, 7);
+    (byMonth[ym2] = byMonth[ym2] || []).push(r);
+    seqMap[r.reservation_id] = { ym: ym2, idx: byMonth[ym2].length };
+  });
+  let curYm = '';
+  const thisYm = jstToday().slice(0, 7);
   hist.forEach(function(r) {
+    const sq = seqMap[r.reservation_id] || {};
+    if (sq.ym && sq.ym !== curYm) {
+      curYm = sq.ym;
+      const total = (byMonth[curYm] || []).length;
+      let head = parseInt(curYm.slice(0, 5), 10) + '年' + parseInt(curYm.slice(5, 7), 10) + '月　' + total + '回';
+      let warn = false;
+      if (quotaN) {
+        head += '／月' + quotaN + '回';
+        if (total < quotaN && curYm >= thisYm) { head += '　⚠️あと' + (quotaN - total) + '回 未予約'; warn = true; }
+        else if (total >= quotaN) head += ' ✅';
+        else head += '（消化' + total + '/' + quotaN + '）';
+      }
+      html += '<div class="mhead' + (warn ? ' warn' : '') + '">' + esc(head) + '</div>';
+    }
     const future = r.booking_start >= nowIso;
     html += '<div class="hist"><span class="d' + (future ? ' future' : '') + '">' + fmtDate(r.booking_start) + '</span>'
+      + '<span class="seq">' + (sq.idx || '') + '回目</span>'
       + '<span>' + fmtTime(r.booking_start) + '</span>'
       + '<span style="flex:1">' + esc(r.menu || '') + '</span>'
       + '<span class="badge" style="background:' + storeColor(r.store_tag) + ';font-size:10px">' + esc(r.store_tag || '') + '</span>'
