@@ -134,6 +134,39 @@
   .rep .tot td { font-weight:700; background:#fafcfb; }
   .bar { height:6px; background:#e8eeec; border-radius:4px; overflow:hidden; margin-top:3px; }
   .bar span { display:block; height:100%; background:var(--accent); }
+  .tbblk.calb { background:repeating-linear-gradient(45deg, #dfe6f4 0 6px, #d4ddf1 6px 12px); color:#40518a; border:none; cursor:default; font-weight:600; }
+
+  /* ── ニューモーフィズムUI（機能そのまま・見た目の上書き） ── */
+  :root { --bg:#e8ede9; --card:#e8ede9; --line:#d6ded9; --sd:#c5cfc8; --sl:#ffffff; }
+  body { background:var(--bg); }
+  header { background:var(--bg); color:var(--accent-d); box-shadow:0 4px 14px rgba(140,155,147,.35); }
+  header .brand { color:var(--accent-d); }
+  header a, header button { background:var(--bg); color:#41504a; box-shadow:3px 3px 7px var(--sd), -3px -3px 7px var(--sl); border-radius:12px; }
+  header a.on { box-shadow:inset 3px 3px 6px var(--sd), inset -3px -3px 6px var(--sl); color:var(--accent); font-weight:800; background:var(--bg); }
+  .card { background:var(--card); border:none; box-shadow:7px 7px 16px var(--sd), -7px -7px 16px var(--sl); }
+  .row { background:var(--bg); border:none; box-shadow:4px 4px 10px var(--sd), -4px -4px 10px var(--sl); }
+  .rowwrap .ck { background:var(--bg); border:none; box-shadow:3px 3px 7px var(--sd), -3px -3px 7px var(--sl); }
+  .rowwrap .ck.on { background:var(--accent); color:#fff; box-shadow:inset 3px 3px 6px rgba(12,60,45,.45); }
+  .tlwrap { background:var(--bg); border:none; box-shadow:inset 4px 4px 10px var(--sd), inset -4px -4px 10px var(--sl); border-radius:16px; }
+  .tlname { background:var(--bg); }
+  .tlrow:nth-child(even) .tltrack { background-color:transparent; }
+  .rep, .rep th:first-child, .rep td:first-child { background:var(--bg); }
+  .rep thead th { background:#dde5df; }
+  .rep .tot td { background:#dde5df; }
+  input, select, textarea { background:var(--bg); border:none !important; box-shadow:inset 3px 3px 6px var(--sd), inset -3px -3px 6px var(--sl); border-radius:12px; outline:none; }
+  .daynav button, .selbar button, .tabs a, .chips a, .tagbtn, .mic, .searchbar .btn { background:var(--bg); border:none; box-shadow:3px 3px 7px var(--sd), -3px -3px 7px var(--sl); }
+  .tabs a.on, .chips a.on { background:var(--bg); color:var(--accent); font-weight:800; border:none; box-shadow:inset 3px 3px 6px var(--sd), inset -3px -3px 6px var(--sl); }
+  .tagbtn.on { background:var(--accent); color:#fff; box-shadow:inset 3px 3px 6px rgba(12,60,45,.45); }
+  .tagbtn.warn.on { background:#b3261e; box-shadow:inset 3px 3px 6px rgba(90,15,10,.45); }
+  .chips a.offchip { background:var(--bg); color:#b3261e; box-shadow:inset 2px 2px 5px var(--sd), inset -2px -2px 5px var(--sl); }
+  .btn { background:linear-gradient(120deg, var(--accent), #2c8a6a); box-shadow:4px 4px 10px var(--sd), -4px -4px 10px var(--sl); border:none; }
+  .btn:active, .daynav button:active, .selbar button:active, .mic:active { box-shadow:inset 3px 3px 6px var(--sd), inset -3px -3px 6px var(--sl); }
+  .mic.rec { background:#b3261e; color:#fff; box-shadow:inset 3px 3px 6px rgba(90,15,10,.45); }
+  .staff-head { color:#33423b; }
+  .login-wrap .card { box-shadow:9px 9px 20px var(--sd), -9px -9px 20px var(--sl); }
+  .bar { background:#d9e1db; box-shadow:inset 1px 1px 3px var(--sd); }
+  .note, .hist { border-color:var(--line); }
+  .qa { border-color:var(--line); }
 </style>
 </head>
 <body>
@@ -901,6 +934,32 @@ function shiftShadeHtml(sh, codes) {
   if (cur < TL_END) h += _shoffDiv(cur, TL_END);
   return h;
 }
+// Googleカレンダーの予定ミラー（MTG・研修・考える時間など詳細タイトル付き）
+async function fetchCalEvents(fromDate, toDateExcl) {
+  const { data } = await sb.from('crm_cal_events').select('*')
+    .gte('date', fromDate).lt('date', toDateExcl).limit(1000);
+  return data || [];
+}
+function calFor(evts, staffName, dateStr) {
+  return evts.filter(function(x) { return nw(x.staff_name) === nw(staffName) && x.date === dateStr; });
+}
+function calBlocksHtml(evts) {
+  let h = '';
+  evts.forEach(function(x) {
+    let left = 0, width = 100;
+    if (!x.all_day && x.start_time) {
+      const s = Math.max(hm2m(x.start_time), TL_START);
+      const e = Math.min(x.end_time ? hm2m(x.end_time) : hm2m(x.start_time) + 60, TL_END);
+      if (e <= s) return;
+      left = (s - TL_START) / TL_TOTAL * 100;
+      width = (e - s) / TL_TOTAL * 100;
+    }
+    h += '<div class="tbblk calb" style="left:' + left + '%;width:' + width + '%"'
+      + ' title="' + esc('📅 ' + x.title + (x.start_time ? '（' + x.start_time + '-' + (x.end_time || '') + '）' : '（終日）')) + '">'
+      + '📅' + esc(x.title) + '</div>';
+  });
+  return h;
+}
 function shiftStaffs(shifts, dateStr) {
   // その日にシフト行がある人全員（休み・会議の人も行を出して見える化する）
   const s = {};
@@ -948,9 +1007,11 @@ function unionStaffs(rows, blocks) {
 }
 function wireBlockDelete(rerender) {
   Array.prototype.forEach.call(document.querySelectorAll('.tbblk'), function(el) {
+    const bid = el.getAttribute('data-bid');
+    if (!bid) return;  // カレンダー予定ミラー等（削除対象外）
     el.onclick = async function() {
       if (!confirm('この休み/ブロックを削除しますか？')) return;
-      await sb.from('crm_time_blocks').delete().eq('id', el.getAttribute('data-bid'));
+      await sb.from('crm_time_blocks').delete().eq('id', bid);
       rerender();
     };
   });
@@ -1087,6 +1148,7 @@ async function renderTimeline(params) {
     const dayMeta = await fetchCustMeta(data);
     const dayShifts = await fetchShifts(date, addDays(date, 1));
     const codes = await shiftCodes();
+    const dayCal = await fetchCalEvents(date, addDays(date, 1));
     const storeSel = params.get('store') || '';
     const stores = {};
     data.forEach(function(r) { if (r.store_tag) stores[r.store_tag] = true; });
@@ -1148,6 +1210,7 @@ async function renderTimeline(params) {
         html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + shiftTagHtml(sh, codes) + '</div><div class="tltrack">'
           + shiftShadeHtml(sh, codes)
           + tbBlocksHtml(blocksFor(dayBlocks, st, date))
+          + calBlocksHtml(calFor(dayCal, st, date))
           + tlBlocksHtml(byStaff(rows, st), dayChecks, dayMeta) + '</div></div>';
       });
       html += '</div></div>';
@@ -1186,9 +1249,9 @@ async function renderTimeline(params) {
       nextKey = { ym: addDays(last, 1).slice(0, 7), staff: staff, date: date };
     }
     const endExcl = addDays(start, daysN);
-    const [resQ, checks, blocks, shifts, codes] = await Promise.all([
+    const [resQ, checks, blocks, shifts, codes, calEvts] = await Promise.all([
       fetchRange(start, endExcl), fetchChecks(start, endExcl), fetchBlocks(start, endExcl),
-      fetchShifts(start, endExcl), shiftCodes(),
+      fetchShifts(start, endExcl), shiftCodes(), fetchCalEvents(start, endExcl),
     ]);
     if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
     const data = resQ.data || [];
@@ -1242,6 +1305,7 @@ async function renderTimeline(params) {
           html += '<div class="tlrow"><div class="tlname">' + esc(st) + shiftTagHtml(sh, codes) + '</div><div class="tltrack">'
             + shiftShadeHtml(sh, codes)
             + tbBlocksHtml(blocksFor(blocks, st, d))
+            + calBlocksHtml(calFor(calEvts, st, d))
             + tlBlocksHtml(byStaff(dayRows, st), checks, wkMeta)
             + '</div></div>';
         });
@@ -1252,6 +1316,7 @@ async function renderTimeline(params) {
           + '<div class="tltrack">'
           + shiftShadeHtml(sh, codes)
           + tbBlocksHtml(blocksFor(blocks, staff, d))
+          + calBlocksHtml(calFor(calEvts, staff, d))
           + tlBlocksHtml(byStaff(dayRows, staff), checks, wkMeta)
           + '</div></div>';
       }
