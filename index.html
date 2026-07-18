@@ -247,6 +247,13 @@ async function renderDay(dateStr) {
   if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
   const checks = await fetchChecks(d, addDays(d, 1));
   const meta = await fetchCustMeta(data);
+  // 当日カルテを書いたお客様（📝マーク用）
+  const karteToday = {};
+  {
+    const kt = await sb.from('crm_karte_notes').select('merchant_id,customer_id')
+      .gte('created_at', from).lt('created_at', to).limit(500);
+    (kt.data || []).forEach(function(x) { karteToday[custKey(x.merchant_id, x.customer_id)] = true; });
+  }
 
   let html = '<div class="daynav">'
     + '<button id="prevD">←</button>'
@@ -265,11 +272,13 @@ async function renderDay(dateStr) {
       (groups[st] = groups[st] || []).push(r);
     });
     const gnames = Object.keys(groups).sort();
-    // スタッフ別の件数サマリー
+    // スタッフ別の件数サマリー（✓チェックイン・📝カルテ済み）
     html += '<div class="chips">';
     gnames.forEach(function(st) {
       const done = groups[st].filter(function(r) { return checks[r.reservation_id]; }).length;
-      html += '<a style="pointer-events:none">' + esc(st) + ' ' + groups[st].length + '件' + (done ? '（✓' + done + '）' : '') + '</a>';
+      const kd = groups[st].filter(function(r) { return karteToday[custKey(r.merchant_id, r.customer_id)]; }).length;
+      const full = kd >= groups[st].length ? ' ✅' : '';
+      html += '<a style="pointer-events:none">' + esc(st) + ' ' + groups[st].length + '件（✓' + done + '・📝' + kd + '/' + groups[st].length + '）' + full + '</a>';
     });
     html += '</div><div class="listcols">';
     gnames.forEach(function(st) {
@@ -281,7 +290,7 @@ async function renderDay(dateStr) {
           + '<button class="ck' + (ck ? ' on' : '') + '" data-rid="' + r.reservation_id + '" title="' + (ck ? esc((ck.checked_by_name || '') + ' が確認済み') : '見た印を付ける') + '">✓</button>'
           + '<a class="row" style="flex:1;margin-bottom:0" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">'
           + '<span class="time">' + fmtTime(r.booking_start) + '</span>'
-          + '<span class="cust">' + rowBadges(r, meta) + esc(r.customer_name || '（名前なし）')
+          + '<span class="cust">' + (karteToday[custKey(r.merchant_id, r.customer_id)] ? '📝' : '') + rowBadges(r, meta) + esc(r.customer_name || '（名前なし）')
           + (rowNextAction(r, meta) ? '<div class="nx">📌 ' + esc(rowNextAction(r, meta)) + '</div>' : '')
           + '</span>'
           + '<span class="menu">' + esc(r.menu || '') + '</span>'
