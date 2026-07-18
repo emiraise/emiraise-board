@@ -141,6 +141,7 @@
   <a href="#/subs">月謝</a>
   <a href="#/report">日報</a>
   <a href="#/search">検索</a>
+  <button id="pwBtn" title="パスワード変更">🔑</button>
   <button id="logoutBtn">ログアウト</button>
 </header>
 <main id="app"><div class="empty">読み込み中…</div></main>
@@ -155,6 +156,13 @@ const sb = createClient(SB_URL, SB_KEY);
 const app = document.getElementById('app');
 const topbar = document.getElementById('topbar');
 document.getElementById('logoutBtn').onclick = async () => { await sb.auth.signOut(); location.hash = ''; render(); };
+document.getElementById('pwBtn').onclick = async function() {
+  const p = prompt('新しいパスワードを入力してください（8文字以上・自分だけが知るものに）');
+  if (p === null) return;
+  if (p.length < 8) { alert('8文字以上にしてください'); return; }
+  const { error } = await sb.auth.updateUser({ password: p });
+  alert(error ? '変更できませんでした: ' + error.message : 'パスワードを変更しました。次回からは新しいパスワードでログインしてください。');
+};
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
