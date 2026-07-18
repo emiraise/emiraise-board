@@ -671,7 +671,7 @@ async function renderCustomer(mid, cid) {
       personality: document.getElementById('lbPers').value.trim() || null,
       profile_note: document.getElementById('lbProf').value.trim() || null,
       next_action: document.getElementById('lbNext').value.trim() || null,
-      updated_by_name: (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '',
+      updated_by_name: (u && u.user_metadata && u.user_metadata.name) || (await myStaffName()) || (u && u.email) || '',
       updated_at: new Date().toISOString(),
     }, { onConflict: 'merchant_id,customer_id' });
     if (error) { alert('保存できませんでした: ' + error.message); this.disabled = false; return; }
@@ -724,7 +724,7 @@ async function renderCustomer(mid, cid) {
       merchant_id: mid, customer_id: Number(cid),
       to_staff: document.getElementById('hoTo').value,
       note: note,
-      author_name: (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '',
+      author_name: (u && u.user_metadata && u.user_metadata.name) || (await myStaffName()) || (u && u.email) || '',
     });
     if (error) { alert('送れませんでした: ' + error.message); this.disabled = false; return; }
     renderCustomer(mid, cid);
@@ -734,7 +734,7 @@ async function renderCustomer(mid, cid) {
       btn.disabled = true;
       const { data: sess } = await sb.auth.getUser();
       const u = sess && sess.user;
-      const nm = (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '';
+      const nm = (u && u.user_metadata && u.user_metadata.name) || (await myStaffName()) || (u && u.email) || '';
       await sb.from('crm_handover_notes').update({ done: true, done_by: nm, done_at: new Date().toISOString() })
         .eq('id', btn.getAttribute('data-hodone'));
       renderCustomer(mid, cid);
@@ -751,7 +751,7 @@ async function renderCustomer(mid, cid) {
     const u = sess && sess.user;
     const { error } = await sb.from('crm_exercise_notes').insert({
       merchant_id: mid, customer_id: Number(cid), exercise: ex, observation: obs,
-      author_name: (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '',
+      author_name: (u && u.user_metadata && u.user_metadata.name) || (await myStaffName()) || (u && u.email) || '',
     });
     if (error) { alert('保存できませんでした: ' + error.message); this.disabled = false; return; }
     renderCustomer(mid, cid);
@@ -763,7 +763,7 @@ async function renderCustomer(mid, cid) {
     this.disabled = true;
     const { data: sess } = await sb.auth.getUser();
     const u = sess && sess.user;
-    const authorName = (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '';
+    const authorName = (u && u.user_metadata && u.user_metadata.name) || (await myStaffName()) || (u && u.email) || '';
     const { error } = await sb.from('crm_karte_notes').insert({
       merchant_id: mid, customer_id: Number(cid), note: txt, author_name: authorName,
     });
@@ -844,7 +844,7 @@ async function toggleCheck(r, isChecked) {
   } else {
     const { data: sess } = await sb.auth.getUser();
     const u = sess && sess.user;
-    const nm = (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '';
+    const nm = (u && u.user_metadata && u.user_metadata.name) || (await myStaffName()) || (u && u.email) || '';
     await sb.from('crm_reservation_checks').insert({
       reservation_id: r.reservation_id, booking_start: r.booking_start, checked_by_name: nm,
     });
@@ -1108,7 +1108,7 @@ function wireBlockForm(rerender) {
       end_time: all ? null : document.getElementById('tbTo').value,
       reason: document.getElementById('tbReason').value,
       note: document.getElementById('tbNote').value.trim() || null,
-      created_by_name: (u && u.user_metadata && u.user_metadata.name) || (u && u.email) || '',
+      created_by_name: (u && u.user_metadata && u.user_metadata.name) || (await myStaffName()) || (u && u.email) || '',
     };
     if (!payload.staff_name || !payload.date) return;
     const { error } = await sb.from('crm_time_blocks').insert(payload);
