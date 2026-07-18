@@ -139,6 +139,7 @@
   .bar { height:6px; background:#e8eeec; border-radius:4px; overflow:hidden; margin-top:3px; }
   .bar span { display:block; height:100%; background:var(--accent); }
   .tbblk.calb { background:repeating-linear-gradient(45deg, #dfe6f4 0 6px, #d4ddf1 6px 12px); color:#40518a; border:none; cursor:default; font-weight:600; }
+  .avslot { position:absolute; top:3px; bottom:3px; z-index:0; background:rgba(46,160,110,.14); border:1.5px dashed #2ea06e; border-radius:8px; color:#1f6f54; font-size:10px; font-weight:800; padding:1px 4px; overflow:hidden; }
 
   /* ── ニューモーフィズムUI（機能そのまま・見た目の上書き） ── */
   :root { --bg:#e8ede9; --card:#e8ede9; --line:#d6ded9; --sd:#c5cfc8; --sl:#ffffff; }
@@ -993,6 +994,29 @@ function shiftShadeHtml(sh, codes) {
   if (cur < TL_END) h += _shoffDiv(cur, TL_END);
   return h;
 }
+// STORES公開予約ページの「実質予約可能な枠」（10分ごと自動更新）
+async function fetchAvail(fromDate, toDateExcl) {
+  const { data } = await sb.from('crm_avail_slots').select('*')
+    .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
+  return data || [];
+}
+function availFor(av, staffName, dateStr) {
+  return av.filter(function(x) { return nw(x.staff_name) === nw(staffName) && x.date === dateStr; });
+}
+function availBlocksHtml(ranges) {
+  let h = '';
+  ranges.forEach(function(x) {
+    const s = Math.max(hm2m(x.start_time), TL_START);
+    const e = Math.min(hm2m(x.end_time), TL_END);
+    if (e <= s) return;
+    const left = (s - TL_START) / TL_TOTAL * 100;
+    const width = (e - s) / TL_TOTAL * 100;
+    h += '<div class="avslot" style="left:' + left + '%;width:' + width + '%"'
+      + ' title="' + esc('予約受付可能 ' + x.start_time + '-' + x.end_time + '（STORES公開枠）') + '">空</div>';
+  });
+  return h;
+}
+
 // Googleカレンダーの予定ミラー（MTG・研修・考える時間など詳細タイトル付き）
 async function fetchCalEvents(fromDate, toDateExcl) {
   const { data } = await sb.from('crm_cal_events').select('*')
@@ -1208,6 +1232,7 @@ async function renderTimeline(params) {
     const dayShifts = await fetchShifts(date, addDays(date, 1));
     const codes = await shiftCodes();
     const dayCal = await fetchCalEvents(date, addDays(date, 1));
+    const dayAvail = await fetchAvail(date, addDays(date, 1));
     const storeSel = params.get('store') || '';
     const stores = {};
     data.forEach(function(r) { if (r.store_tag) stores[r.store_tag] = true; });
@@ -1268,12 +1293,13 @@ async function renderTimeline(params) {
         const sh = shiftFor(dayShifts, st, date);
         html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + shiftTagHtml(sh, codes) + '</div><div class="tltrack">'
           + shiftShadeHtml(sh, codes)
+          + availBlocksHtml(availFor(dayAvail, st, date))
           + tbBlocksHtml(blocksFor(dayBlocks, st, date))
           + calBlocksHtml(calFor(dayCal, st, date))
           + tlBlocksHtml(byStaff(rows, st), dayChecks, dayMeta) + '</div></div>';
       });
       html += '</div></div>';
-      html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">斜線＝シフト表の休み・シフト外/会議など（シフト表から自動取込）｜グレー＝固定ブロック（休憩・休み）｜<span style="color:#805e12;font-weight:700">琥珀↔＝予約希望があれば動かせる枠</span>（MEO対策・MTG・研修準備など）</div>';
+      html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px"><span style="color:#1f6f54;font-weight:700">緑点線「空」＝今お客様が予約できる枠（STORES公開情報・10分ごと更新）</span>｜斜線＝シフト外・休み・会議（シフト表/カレンダーから自動）｜グレー＝固定ブロック（休憩・休み）｜<span style="color:#805e12;font-weight:700">琥珀↔＝動かせるブロック</span>。緑もグレーも無い時間＝STORES側でブロック済みか受付対象外です</div>';
     }
     app.innerHTML = html;
     const rerenderDay = function() { renderTimeline(params); };
@@ -1308,9 +1334,9 @@ async function renderTimeline(params) {
       nextKey = { ym: addDays(last, 1).slice(0, 7), staff: staff, date: date };
     }
     const endExcl = addDays(start, daysN);
-    const [resQ, checks, blocks, shifts, codes, calEvts] = await Promise.all([
+    const [resQ, checks, blocks, shifts, codes, calEvts, avail] = await Promise.all([
       fetchRange(start, endExcl), fetchChecks(start, endExcl), fetchBlocks(start, endExcl),
-      fetchShifts(start, endExcl), shiftCodes(), fetchCalEvents(start, endExcl),
+      fetchShifts(start, endExcl), shiftCodes(), fetchCalEvents(start, endExcl), fetchAvail(start, endExcl),
     ]);
     if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
     const data = resQ.data || [];
@@ -1363,6 +1389,7 @@ async function renderTimeline(params) {
           const sh = shiftFor(shifts, st, d);
           html += '<div class="tlrow"><div class="tlname">' + esc(st) + shiftTagHtml(sh, codes) + '</div><div class="tltrack">'
             + shiftShadeHtml(sh, codes)
+            + availBlocksHtml(availFor(avail, st, d))
             + tbBlocksHtml(blocksFor(blocks, st, d))
             + calBlocksHtml(calFor(calEvts, st, d))
             + tlBlocksHtml(byStaff(dayRows, st), checks, wkMeta)
@@ -1374,6 +1401,7 @@ async function renderTimeline(params) {
           + '<div class="tlname' + dayNameCls(d, today) + '">' + fmtMD(d) + shiftTagHtml(sh, codes) + '</div>'
           + '<div class="tltrack">'
           + shiftShadeHtml(sh, codes)
+          + availBlocksHtml(availFor(avail, staff, d))
           + tbBlocksHtml(blocksFor(blocks, staff, d))
           + calBlocksHtml(calFor(calEvts, staff, d))
           + tlBlocksHtml(byStaff(dayRows, staff), checks, wkMeta)
