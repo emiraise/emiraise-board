@@ -36,6 +36,7 @@
   .kv dt { color:var(--sub); } .kv dd { margin:0; word-break:break-all; }
   .pill { display:inline-block; background:#eef3f1; border-radius:999px; padding:4px 10px; font-size:12px; margin:2px 4px 2px 0; }
   .pill.warn { background:#fdecec; color:#b3261e; }
+  .pill.mild { background:#fbf3d9; color:#8a6d1a; }
   .hist { display:flex; gap:10px; padding:9px 2px; border-bottom:1px solid var(--line); font-size:13px; align-items:baseline; }
   .hist:last-child { border-bottom:none; }
   .hist .d { min-width:104px; font-variant-numeric:tabular-nums; }
@@ -909,7 +910,11 @@ function statAlerts(st) {
   if (!st.next_visit && gap !== null) {
     const threshold = Math.max(21, (st.avg_interval_days || 14) * 1.5);
     if (gap > 90) out.push({ cls: 'warn', text: '💤 休眠（' + gap + '日来店なし）' });
-    else if (gap > threshold) out.push({ cls: 'warn', text: '🔴 離脱注意（前回から' + gap + '日・次回予約なし）' });
+    else if (gap > threshold) {
+      // 長期のお客様（15回以上）は関係性ができているため🟡ゆるやか判定（大地さん方針）
+      if ((st.past_visits || 0) >= 15) out.push({ cls: 'mild', text: '🟡 ペース変化・様子見（長期のお客様・前回から' + gap + '日）' });
+      else out.push({ cls: 'warn', text: '🔴 離脱注意（前回から' + gap + '日・次回予約なし）' });
+    }
   }
   return out;
 }
@@ -1532,10 +1537,11 @@ async function renderReport(params) {
     const gap = daysBetween(st.last_visit, Date.now());
     const threshold = Math.max(21, (st.avg_interval_days || 14) * 1.5);
     if (gap > threshold && gap <= 90 && st.past_visits >= 1) {
-      riskList.push({ st: st, gap: gap });
+      riskList.push({ st: st, gap: gap, mild: (st.past_visits || 0) >= 15 });
     }
   });
-  riskList.sort(function(a, b) { return a.gap - b.gap; });
+  // 🔴（新しめのお客様）を先に、🟡（長期のお客様＝ゆるやか対応）を後に
+  riskList.sort(function(a, b) { return (a.mild ? 1 : 0) - (b.mild ? 1 : 0) || a.gap - b.gap; });
 
   const ticketList = [];
   (custAll.data || []).forEach(function(cu) {
@@ -1544,11 +1550,12 @@ async function renderReport(params) {
   });
 
   html += '<div class="card" style="margin-top:12px"><h2>🔴 フォロー対象（自動抽出・現時点）</h2>';
-  html += '<h3>離脱注意（次回予約なし・来店ペース超過）</h3>';
+  html += '<h3>離脱注意（次回予約なし・来店ペース超過）　<small style="color:var(--sub);font-weight:400">🔴=優先フォロー／🟡=長期のお客様（15回以上）はゆるやかに様子見</small></h3>';
   if (!riskList.length) html += '<div class="empty" style="padding:8px 0">現在該当なし 🎉</div>';
   riskList.slice(0, 15).forEach(function(x) {
     const k = custKey(x.st.merchant_id, x.st.customer_id);
-    html += '<div class="hist"><a style="flex:1;color:var(--accent);text-decoration:none" href="#/c/' + encodeURIComponent(x.st.merchant_id) + '/' + x.st.customer_id + '">' + esc(nameOf[k] || '（名前不明）') + '</a>'
+    html += '<div class="hist"><span>' + (x.mild ? '🟡' : '🔴') + '</span>'
+      + '<a style="flex:1;color:var(--accent);text-decoration:none" href="#/c/' + encodeURIComponent(x.st.merchant_id) + '/' + x.st.customer_id + '">' + esc(nameOf[k] || '（名前不明）') + '</a>'
       + '<span>前回から' + x.gap + '日</span><span style="color:var(--sub)">来店' + x.st.past_visits + '回</span></div>';
   });
   if (riskList.length > 15) html += '<div style="color:var(--sub);font-size:12px">…ほか' + (riskList.length - 15) + '名</div>';
