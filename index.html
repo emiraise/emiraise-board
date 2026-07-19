@@ -1667,7 +1667,7 @@ async function renderSubs(params) {
   const nowIso = new Date().toISOString();
 
   const [custQ, resQ] = await Promise.all([
-    sb.from('crm_customers').select('merchant_id,customer_id,name,subscriptions').limit(2000),
+    sb.from('crm_customers').select('merchant_id,customer_id,name,merchant_name,subscriptions').limit(2000),
     fetchRange(first, afterNextFirst),
   ]);
   if (custQ.error || resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー</div>'; return; }
@@ -1707,9 +1707,12 @@ async function renderSubs(params) {
       }
     }
     const stNext = subNextStatus(c.nextB, N, day);
-    list.push({ cu: cu, N: N, c: c, stThis: stThis, stNext: stNext, sev: Math.max(stThis.s, stNext.s) });
+    list.push({ cu: cu, N: N, c: c, stThis: stThis, stNext: stNext, sev: Math.max(stThis.s, stNext.s), stTag: stTag });
   });
-  list.sort(function(a, b) { return b.sev - a.sev || b.stThis.s - a.stThis.s || (a.cu.name || '').localeCompare(b.cu.name || ''); });
+  // 店舗ごとにまとめて表示（各店舗でのチェック運用に対応）→ 店舗内は要対応順
+  list.sort(function(a, b) {
+    return a.stTag.localeCompare(b.stTag) || b.sev - a.sev || b.stThis.s - a.stThis.s || (a.cu.name || '').localeCompare(b.cu.name || '');
+  });
 
   const nRed = list.filter(function(x) { return x.sev >= 3; }).length;
   const nYel = list.filter(function(x) { return x.sev === 2 || x.sev === 1; }).length;
@@ -1731,7 +1734,17 @@ async function renderSubs(params) {
 
   html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
     + '<th>お客様</th><th>コース</th><th>当月（消化/予約/枠）</th><th>翌月' + nmo + '月（予約/枠）</th></tr></thead><tbody>';
+  let curStore = '';
   list.forEach(function(x) {
+    if (x.stTag !== curStore) {
+      curStore = x.stTag;
+      const inStore = list.filter(function(y) { return y.stTag === curStore; });
+      const r = inStore.filter(function(y) { return y.sev >= 3; }).length;
+      const yl = inStore.filter(function(y) { return y.sev === 2 || y.sev === 1; }).length;
+      const g = inStore.filter(function(y) { return y.sev === 0; }).length;
+      html += '<tr><td colspan="4" style="text-align:left;background:#d8e2dc;font-weight:800;font-size:13.5px">'
+        + '🏬 ' + esc(curStore) + '　会員' + inStore.length + '名（🔴' + r + '・🟡' + yl + '・🟢' + g + '）</td></tr>';
+    }
     html += '<tr>'
       + '<td><a style="color:var(--accent);text-decoration:none" href="#/c/' + encodeURIComponent(x.cu.merchant_id) + '/' + x.cu.customer_id + '">' + esc(x.cu.name || '') + '</a></td>'
       + '<td>月' + x.N + '回</td>'
