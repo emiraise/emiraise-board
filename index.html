@@ -127,6 +127,10 @@
   .c-basic { grid-area:basic; } .c-ka { grid-area:ka; } .c-ho { grid-area:ho; }
   .c-hist { grid-area:hist; } .c-lb { grid-area:lb; } .c-ex { grid-area:ex; }
   @media (max-width: 900px) { .pgrid { grid-template-columns:1fr; grid-template-areas:"basic" "ka" "ho" "hist" "lb" "ex"; } }
+  /* 左右独立の縦積み2カラム（行揃えの隙間が出ない） */
+  .pgrid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; align-items:start; }
+  .pgrid2 .pcol { min-width:0; }
+  @media (max-width: 900px) { .pgrid2 { grid-template-columns:1fr; } }
   .tagbtn { padding:6px 12px; border:1px solid var(--line); border-radius:999px; background:#fff; font-size:12px; cursor:pointer; margin:0 6px 6px 0; }
   .tagbtn.on { background:var(--accent); color:#fff; border-color:var(--accent); }
   .tagbtn.warn.on { background:#b3261e; border-color:#b3261e; }
@@ -417,7 +421,8 @@ async function renderCustomer(mid, cid) {
   }
   const name = (c && c.name) || (hist[0] && hist[0].customer_name) || '（不明）';
 
-  let html = '<a class="back" href="#/">← 予約一覧へ</a><div class="pgrid">';
+  const pagePrefix = '<a class="back" href="#/">← 予約一覧へ</a>';
+  let html = '';
 
   // 基本情報
   html += '<div class="card c-basic"><h2>' + esc(name) + (c && c.kana ? ' <small style="color:var(--sub);font-weight:400">' + esc(c.kana) + '</small>' : '') + '</h2>';
@@ -526,6 +531,7 @@ async function renderCustomer(mid, cid) {
   }
   html += '</div>';
 
+  var cardBasic = html; html = '';
   // 📮 申し送り（次の担当者へ・宛先指定＋済みチェック＋鮮度表示）
   html += '<div class="card c-ho"><h2>📮 申し送り（次の担当者へ）</h2>'
     + '<div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">'
@@ -549,6 +555,7 @@ async function renderCustomer(mid, cid) {
   });
   html += '</div>';
 
+  var cardHo = html; html = '';
   // ラベル（タグ・メモ類）
   const bodyNow = (lb && lb.body_tags) || [];
   const goalNow = (lb && lb.goal_tags) || [];
@@ -570,6 +577,7 @@ async function renderCustomer(mid, cid) {
     + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button class="mic" id="lbProfMic">🎤 音声入力</button><button class="btn" id="lbSave">ラベルを保存</button></div>'
     + '</div>';
 
+  var cardLb = html; html = '';
   // エクササイズの気づき（代償・苦手パターン。引き継ぎ&将来のAI提案の基盤）
   const exNameSet = {};
   exNotes.forEach(function(n) { exNameSet[n.exercise] = 1; });
@@ -597,6 +605,7 @@ async function renderCustomer(mid, cid) {
   }
   html += '</div>';
 
+  var cardEx = html; html = '';
   // カルテ
   html += '<div class="card c-ka"><h2>カルテ（引き継ぎメモ）</h2>'
     + '<textarea id="noteText" placeholder="今日の様子・次回の注意点など（🎤で音声入力できます）"></textarea>'
@@ -611,6 +620,7 @@ async function renderCustomer(mid, cid) {
   });
   html += '</div></div>';
 
+  var cardKa = html; html = '';
   // 予約履歴（月ごとにグループ化して「◯回目」と「月N回コースの充足」を表示）
   const quotaN = c ? subQuota(c.subscriptions) : 0;
   html += '<div class="card c-hist"><h2>予約履歴' + (quotaN ? '　<small style="color:var(--sub);font-weight:400">月' + quotaN + '回コース</small>' : '') + '</h2>';
@@ -650,7 +660,11 @@ async function renderCustomer(mid, cid) {
       + (future ? '<span class="pill">予定</span>' : '')
       + '</div>';
   });
-  html += '</div></div>';  // 予約履歴カード + pcols（2列レイアウト）を閉じる
+  html += '</div>';
+  var cardHist = html;
+  // 左右それぞれ独立の縦積み（隙間なく詰める）
+  html = pagePrefix + '<div class="pgrid2"><div class="pcol">' + cardBasic + cardHist + '</div>'
+    + '<div class="pcol">' + cardKa + cardHo + cardLb + cardEx + '</div></div>';
 
   app.innerHTML = html;
 
