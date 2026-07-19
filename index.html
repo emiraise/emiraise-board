@@ -159,6 +159,7 @@
   header a, header button { background:var(--bg); color:#41504a; box-shadow:3px 3px 7px var(--sd), -3px -3px 7px var(--sl); border-radius:12px; }
   header a.on { box-shadow:inset 3px 3px 6px var(--sd), inset -3px -3px 6px var(--sl); color:var(--accent); font-weight:800; background:var(--bg); }
   header a.brand, header a.brand.on { background:none; box-shadow:none; padding:0; border-radius:0; color:var(--accent-d); font-weight:700; font-size:15px; margin-right:auto; text-decoration:none; cursor:pointer; }
+  .brandimg { height:46px; display:block; margin:-8px 0; mix-blend-mode:multiply; }
   .card { background:var(--card); border:none; box-shadow:7px 7px 16px var(--sd), -7px -7px 16px var(--sl); }
   .row { background:var(--bg); border:none; box-shadow:4px 4px 10px var(--sd), -4px -4px 10px var(--sl); }
   .rowwrap .ck { background:var(--bg); border:none; box-shadow:3px 3px 7px var(--sd), -3px -3px 7px var(--sl); }
@@ -187,7 +188,7 @@
 </head>
 <body>
 <header id="topbar" hidden>
-  <a class="brand" href="#/">エミライズ 顧客ボード</a>
+  <a class="brand" href="#/"><img src="logo.png" alt="Emiraise 顧客ボード" class="brandimg"></a>
   <a href="#/">予約</a>
   <a href="#/tl">タイムライン</a>
   <a href="#/subs">月謝</a>
