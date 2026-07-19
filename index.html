@@ -334,6 +334,16 @@ async function renderDay(dateStr) {
       const full = kd >= groups[st].length ? ' ✅' : '';
       html += '<a style="pointer-events:none">' + esc(st) + ' ' + groups[st].length + '件（✓' + done + '・📝' + kd + '/' + groups[st].length + '）' + full + '</a>';
     });
+    // シフト上「出勤」なのに予約が入っていないスタッフ（こうじ・大地など）も表示
+    dayShiftsL.filter(function(s) { return s.kind === 'work'; }).forEach(function(s) {
+      if (gnames.some(function(g) { return nw(g) === nw(s.staff_name); })) return;
+      html += '<a style="pointer-events:none">☀ ' + esc(s.staff_name) + ' 出勤'
+        + (s.code ? '（' + esc(s.code) + '）' : '') + (s.store ? '【' + esc(s.store) + '】' : '') + '・予約0件</a>';
+    });
+    // 会議・研修・出張などのスタッフ（青）
+    dayShiftsL.filter(function(s) { return s.kind === 'other'; }).forEach(function(s) {
+      html += '<a style="pointer-events:none;color:#5a67a5">📅 ' + esc(s.staff_name) + ' ' + esc(s.label || '') + '</a>';
+    });
     // 今日休みのスタッフを赤チップで表示
     dayShiftsL.filter(function(s) { return s.kind === 'off'; }).forEach(function(s) {
       html += '<a class="offchip">🌙 ' + esc(s.staff_name) + ' ' + esc(s.label || '休み') + '</a>';
