@@ -121,6 +121,12 @@
   .tbform select, .tbform input { border:1px solid var(--line); border-radius:8px; padding:7px; font-size:13px; background:#fff; }
   .pcols { columns: 2 460px; column-gap:12px; }
   .pcols .card { break-inside: avoid; }
+  /* 顧客ページ: 左=基本情報→予約履歴 / 右=カルテ→申し送り→ラベル→気づき（見落とし防止の並び） */
+  .pgrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:start;
+    grid-template-areas:"basic ka" "basic ho" "hist lb" "hist ex"; }
+  .c-basic { grid-area:basic; } .c-ka { grid-area:ka; } .c-ho { grid-area:ho; }
+  .c-hist { grid-area:hist; } .c-lb { grid-area:lb; } .c-ex { grid-area:ex; }
+  @media (max-width: 900px) { .pgrid { grid-template-columns:1fr; grid-template-areas:"basic" "ka" "ho" "hist" "lb" "ex"; } }
   .tagbtn { padding:6px 12px; border:1px solid var(--line); border-radius:999px; background:#fff; font-size:12px; cursor:pointer; margin:0 6px 6px 0; }
   .tagbtn.on { background:var(--accent); color:#fff; border-color:var(--accent); }
   .tagbtn.warn.on { background:#b3261e; border-color:#b3261e; }
@@ -411,10 +417,10 @@ async function renderCustomer(mid, cid) {
   }
   const name = (c && c.name) || (hist[0] && hist[0].customer_name) || '（不明）';
 
-  let html = '<a class="back" href="#/">← 予約一覧へ</a><div class="pcols">';
+  let html = '<a class="back" href="#/">← 予約一覧へ</a><div class="pgrid">';
 
   // 基本情報
-  html += '<div class="card"><h2>' + esc(name) + (c && c.kana ? ' <small style="color:var(--sub);font-weight:400">' + esc(c.kana) + '</small>' : '') + '</h2>';
+  html += '<div class="card c-basic"><h2>' + esc(name) + (c && c.kana ? ' <small style="color:var(--sub);font-weight:400">' + esc(c.kana) + '</small>' : '') + '</h2>';
 
   // 自動アラート（来店履歴と回数券から判定）＋ラベルの要約
   const pastArr = hist.filter(function(r) { return r.booking_start < nowIso && r.status === 'accepted'; });
@@ -521,7 +527,7 @@ async function renderCustomer(mid, cid) {
   html += '</div>';
 
   // 📮 申し送り（次の担当者へ・宛先指定＋済みチェック＋鮮度表示）
-  html += '<div class="card"><h2>📮 申し送り（次の担当者へ）</h2>'
+  html += '<div class="card c-ho"><h2>📮 申し送り（次の担当者へ）</h2>'
     + '<div style="display:flex;gap:8px;margin-bottom:6px;align-items:center">'
     + '<span style="font-size:13px;color:var(--sub)">宛先</span>'
     + '<select id="hoTo" style="border:1px solid var(--line);border-radius:10px;padding:9px;font-size:14px;background:#fff"><option>全員</option>';
@@ -546,7 +552,7 @@ async function renderCustomer(mid, cid) {
   // ラベル（タグ・メモ類）
   const bodyNow = (lb && lb.body_tags) || [];
   const goalNow = (lb && lb.goal_tags) || [];
-  html += '<div class="card"><h2>🏷 ラベル</h2>'
+  html += '<div class="card c-lb"><h2>🏷 ラベル</h2>'
     + '<h3>📌 次回アクション（当日の予約一覧・タイムラインに表示）</h3>'
     + '<input id="lbNext" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px" placeholder="例: 腰の様子を聞く / 回数券の案内をする" value="' + esc((lb && lb.next_action) || '') + '">'
     + '<h3>⚠️ 身体の注意</h3><div>';
@@ -568,7 +574,7 @@ async function renderCustomer(mid, cid) {
   const exNameSet = {};
   exNotes.forEach(function(n) { exNameSet[n.exercise] = 1; });
   ['ダウンストレッチ', 'ハンドレッド', 'ロールアップ', 'スワン', 'エレファント', 'フットワーク', 'ショルダーブリッジ', 'ティーザー'].forEach(function(n) { exNameSet[n] = 1; });
-  html += '<div class="card"><h2>🏃 エクササイズの気づき（代償・苦手）</h2>'
+  html += '<div class="card c-ex"><h2>🏃 エクササイズの気づき（代償・苦手）</h2>'
     + '<div style="display:flex;gap:8px;margin-bottom:6px">'
     + '<input id="exName" list="exList" placeholder="エクササイズ名" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px">'
     + '<datalist id="exList">';
@@ -592,7 +598,7 @@ async function renderCustomer(mid, cid) {
   html += '</div>';
 
   // カルテ
-  html += '<div class="card"><h2>カルテ（引き継ぎメモ）</h2>'
+  html += '<div class="card c-ka"><h2>カルテ（引き継ぎメモ）</h2>'
     + '<textarea id="noteText" placeholder="今日の様子・次回の注意点など（🎤で音声入力できます）"></textarea>'
     + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">'
     + '<button class="mic" id="micBtn">🎤 音声入力</button>'
@@ -607,7 +613,7 @@ async function renderCustomer(mid, cid) {
 
   // 予約履歴（月ごとにグループ化して「◯回目」と「月N回コースの充足」を表示）
   const quotaN = c ? subQuota(c.subscriptions) : 0;
-  html += '<div class="card"><h2>予約履歴' + (quotaN ? '　<small style="color:var(--sub);font-weight:400">月' + quotaN + '回コース</small>' : '') + '</h2>';
+  html += '<div class="card c-hist"><h2>予約履歴' + (quotaN ? '　<small style="color:var(--sub);font-weight:400">月' + quotaN + '回コース</small>' : '') + '</h2>';
   if (!hist.length) html += '<div class="empty">履歴がありません</div>';
   // 月ごとの通し番号（古い順で1回目・2回目…と数える）
   const seqMap = {};
@@ -1630,7 +1636,8 @@ function subNextStatus(booked, N, day) {
   if (booked === 0) return { s: 3, icon: '🔴', text: '予約ゼロ' };
   return { s: 2, icon: '🟡', text: 'あと' + (N - booked) + '回未予約' };
 }
-async function renderSubs() {
+async function renderSubs(params) {
+  const storeSel = (params && params.get('store')) || '';
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const today = jstToday();
   const ym = today.slice(0, 7);
@@ -1667,9 +1674,13 @@ async function renderSubs() {
   });
 
   const list = [];
+  const storeSet = {};
   (custQ.data || []).forEach(function(cu) {
     const N = subQuota(cu.subscriptions);
     if (!N) return;
+    const stTag = ((cu.merchant_name || '').split(/[\s　]/).pop()) || '店舗不明';
+    storeSet[stTag] = true;
+    if (storeSel && stTag !== storeSel) return;
     const k = custKey(cu.merchant_id, cu.customer_id);
     const c = cnt[k] || { thisB: 0, thisV: 0, nextB: 0 };
     const stThis = subMonthStatus(c.thisB, N, dim - day + 1);
@@ -1690,9 +1701,15 @@ async function renderSubs() {
   const nYel = list.filter(function(x) { return x.sev === 2 || x.sev === 1; }).length;
   const nGrn = list.filter(function(x) { return x.sev === 0; }).length;
 
-  let html = '<h2>月謝コースの予約消化（' + mo + '月・会員' + list.length + '名）</h2>';
+  let html = '<h2>月謝コースの予約消化（' + mo + '月・会員' + list.length + '名' + (storeSel ? '・' + esc(storeSel) : '') + '）</h2>';
+  // 店舗フィルタ
+  html += '<div class="chips"><a class="' + (storeSel ? '' : 'on') + '" href="#/subs">全店</a>';
+  Object.keys(storeSet).sort().forEach(function(stTag) {
+    html += '<a class="' + (storeSel === stTag ? 'on' : '') + '" href="#/subs?store=' + encodeURIComponent(stTag) + '">' + esc(stTag) + '</a>';
+  });
+  html += '</div>';
   html += '<div class="chips">'
-    + '<a class="on" style="background:#b3261e;border-color:#b3261e">🔴 要対応 ' + nRed + '名</a>'
+    + '<a style="pointer-events:none;background:#b3261e;border-color:#b3261e;color:#fff">🔴 要対応 ' + nRed + '名</a>'
     + '<a style="pointer-events:none">🟡🟠 注意 ' + nYel + '名</a>'
     + '<a style="pointer-events:none">🟢 OK ' + nGrn + '名</a>'
     + '</div>';
@@ -1740,7 +1757,10 @@ async function render() {
     renderReport(new URLSearchParams(hash.split('?')[1] || ''));
     return;
   }
-  if (hash.indexOf('#/subs') === 0) { renderSubs(); return; }
+  if (hash.indexOf('#/subs') === 0) {
+    renderSubs(new URLSearchParams(hash.split('?')[1] || ''));
+    return;
+  }
   if (hash.indexOf('#/search') === 0) {
     const q = new URLSearchParams(hash.split('?')[1] || '').get('q') || '';
     renderSearch(q); return;
