@@ -84,6 +84,7 @@
     background:repeating-linear-gradient(45deg, #f8e7e7 0 10px, #f3dbdb 10px 20px); }
   .chips a.offchip { background:#fdecec; border-color:#f0c9c9; color:#b3261e; pointer-events:none; }
   .tlday { padding:6px 10px; background:#e7eeeb; font-weight:700; font-size:12.5px; border-top:2px solid #cdd6d2; position:sticky; left:0; }
+  .tltrack[data-staff] { cursor:copy; }
   .tltrack { position:relative; flex:1; height:88px; background-image:repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px 8%); }
   .tlhead .tltrack { height:22px; background:none; }
   .tlhour { position:absolute; top:4px; font-size:10px; color:var(--sub); padding-left:3px; }
@@ -1120,6 +1121,34 @@ function unionStaffs(rows, blocks) {
   blocks.forEach(function(b) { if (b.staff_name) s[b.staff_name] = true; });
   return Object.keys(s).sort();
 }
+function wireTrackQuickAdd() {
+  // タイムラインの空き部分をクリック → その場所（スタッフ×日付×時間）でブロック追加フォームを開く
+  Array.prototype.forEach.call(document.querySelectorAll('.tltrack[data-staff]'), function(tr) {
+    tr.addEventListener('click', function(ev) {
+      if (ev.target.closest('.tlblock') || ev.target.closest('.tbblk')) return; // 予約・既存ブロックは除外
+      const form = document.getElementById('tbForm');
+      if (!form) return;
+      const rect = tr.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+      let mins = TL_START + Math.round((ratio * TL_TOTAL) / 30) * 30;
+      mins = Math.max(TL_START, Math.min(mins, TL_END - 60));
+      const hm = function(m) { return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+      const staffSel = document.getElementById('tbStaff');
+      const target = tr.getAttribute('data-staff');
+      Array.prototype.forEach.call(staffSel.options, function(o) { if (nw(o.value) === nw(target)) staffSel.value = o.value; });
+      document.getElementById('tbDate').value = tr.getAttribute('data-date');
+      document.getElementById('tbAll').checked = false;
+      document.getElementById('tbFrom').disabled = false;
+      document.getElementById('tbTo').disabled = false;
+      document.getElementById('tbFrom').value = hm(mins);
+      document.getElementById('tbTo').value = hm(mins + 60);
+      form.hidden = false;
+      form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById('tbNote').focus();
+    });
+  });
+}
+
 function wireBlockDelete(rerender) {
   Array.prototype.forEach.call(document.querySelectorAll('.tbblk'), function(el) {
     const bid = el.getAttribute('data-bid');
@@ -1323,7 +1352,7 @@ async function renderTimeline(params) {
       staffs.forEach(function(st) {
         const me = nw(st) === nw(mineName) ? ' me' : '';
         const sh = shiftFor(dayShifts, st, date);
-        html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + shiftTagHtml(sh, codes) + '</div><div class="tltrack">'
+        html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + shiftTagHtml(sh, codes) + '</div><div class="tltrack" data-staff="' + esc(st) + '" data-date="' + date + '">'
           + shiftShadeHtml(sh, codes)
           + availBlocksHtml(availFor(dayAvail, st, date))
           + tbBlocksHtml(blocksFor(dayBlocks, st, date))
@@ -1337,6 +1366,7 @@ async function renderTimeline(params) {
     const rerenderDay = function() { renderTimeline(params); };
     wireBlockDelete(rerenderDay);
     wireBlockForm(rerenderDay);
+    wireTrackQuickAdd();
     document.getElementById('tlPrev').onclick = function() { location.hash = tlHash('day', { date: addDays(date, -1), store: storeSel }); };
     document.getElementById('tlNext').onclick = function() { location.hash = tlHash('day', { date: addDays(date, 1), store: storeSel }); };
     document.getElementById('tlToday').onclick = function() { location.hash = tlHash('day', {}); };
@@ -1419,7 +1449,7 @@ async function renderTimeline(params) {
         }
         ds.forEach(function(st) {
           const sh = shiftFor(shifts, st, d);
-          html += '<div class="tlrow"><div class="tlname">' + esc(st) + shiftTagHtml(sh, codes) + '</div><div class="tltrack">'
+          html += '<div class="tlrow"><div class="tlname">' + esc(st) + shiftTagHtml(sh, codes) + '</div><div class="tltrack" data-staff="' + esc(st) + '" data-date="' + d + '">'
             + shiftShadeHtml(sh, codes)
             + availBlocksHtml(availFor(avail, st, d))
             + tbBlocksHtml(blocksFor(blocks, st, d))
@@ -1431,7 +1461,7 @@ async function renderTimeline(params) {
         const sh = shiftFor(shifts, staff, d);
         html += '<div class="tlrow"' + (i % 7 === 0 && i > 0 ? ' style="border-top:2px solid #cdd6d2"' : '') + '>'
           + '<div class="tlname' + dayNameCls(d, today) + '">' + fmtMD(d) + shiftTagHtml(sh, codes) + '</div>'
-          + '<div class="tltrack">'
+          + '<div class="tltrack" data-staff="' + esc(staff) + '" data-date="' + d + '">'
           + shiftShadeHtml(sh, codes)
           + availBlocksHtml(availFor(avail, staff, d))
           + tbBlocksHtml(blocksFor(blocks, staff, d))
@@ -1463,6 +1493,7 @@ async function renderTimeline(params) {
     const rerenderWk = function() { renderTimeline(params); };
     wireBlockDelete(rerenderWk);
     wireBlockForm(rerenderWk);
+    wireTrackQuickAdd();
     return;
   }
 }
