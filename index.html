@@ -150,6 +150,7 @@
   .bar { height:6px; background:#e8eeec; border-radius:4px; overflow:hidden; margin-top:3px; }
   .bar span { display:block; height:100%; background:var(--accent); }
   .tbblk.calb { background:repeating-linear-gradient(45deg, #dfe6f4 0 6px, #d4ddf1 6px 12px); color:#40518a; border:none; cursor:default; font-weight:600; }
+  .tbblk.calbk { background:#5f8d7a; color:#fff; border:none; cursor:default; font-weight:700; font-size:11px; box-shadow:0 1px 3px rgba(0,0,0,.2); z-index:1; }
   .avslot { position:absolute; top:3px; bottom:3px; z-index:0; background:rgba(46,160,110,.14); border:1.5px dashed #2ea06e; border-radius:8px; color:#1f6f54; font-size:10px; font-weight:800; padding:1px 4px; overflow:hidden; }
 
   /* ── ニューモーフィズムUI（機能そのまま・見た目の上書き） ── */
@@ -1070,9 +1071,16 @@ function calBlocksHtml(evts) {
       left = (s - TL_START) / TL_TOTAL * 100;
       width = (e - s) / TL_TOTAL * 100;
     }
-    h += '<div class="tbblk calb" style="left:' + left + '%;width:' + width + '%"'
-      + ' title="' + esc('📅 ' + x.title + (x.start_time ? '（' + x.start_time + '-' + (x.end_time || '') + '）' : '（終日）')) + '">'
-      + '📅' + esc(x.title) + '</div>';
+    if (x.kind === 'booking') {
+      // ワンモアハンドの顧客予約 → 実枠として塗りつぶし表示
+      h += '<div class="tbblk calbk" style="left:' + left + '%;width:' + width + '%"'
+        + ' title="' + esc('ワンモア予約 ' + x.title + (x.start_time ? '（' + x.start_time + '-' + (x.end_time || '') + '）' : '')) + '">'
+        + esc(x.title) + '</div>';
+    } else {
+      h += '<div class="tbblk calb" style="left:' + left + '%;width:' + width + '%"'
+        + ' title="' + esc('📅 ' + x.title + (x.start_time ? '（' + x.start_time + '-' + (x.end_time || '') + '）' : '（終日）')) + '">'
+        + '📅' + esc(x.title) + '</div>';
+    }
   });
   return h;
 }
@@ -1125,7 +1133,10 @@ function wireTrackQuickAdd() {
   // タイムラインの空き部分をクリック → その場所（スタッフ×日付×時間）でブロック追加フォームを開く
   Array.prototype.forEach.call(document.querySelectorAll('.tltrack[data-staff]'), function(tr) {
     tr.addEventListener('click', function(ev) {
-      if (ev.target.closest('.tlblock') || ev.target.closest('.tbblk')) return; // 予約・既存ブロックは除外
+      // 予約（リンク）・削除できるブロック・ワンモア予約の上は除外。📅予定や斜線の上は貫通してOK
+      if (ev.target.closest('.tlblock') || ev.target.closest('.calbk')) return;
+      const tb = ev.target.closest('.tbblk');
+      if (tb && tb.getAttribute('data-bid')) return;
       const form = document.getElementById('tbForm');
       if (!form) return;
       const rect = tr.getBoundingClientRect();
