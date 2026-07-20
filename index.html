@@ -982,7 +982,7 @@ async function shiftCodes() {
   return SHIFT_CODES;
 }
 // シフト表の店舗表記 → 予約データの店舗タグ
-const SHIFT_STORE_TAG = { '本店': '金沢本店', '駅西': '金沢駅西店', '富山東': '富山東店', '福井': '福井' };
+const SHIFT_STORE_TAG = { '本店': '金沢本店', '駅西': '金沢駅西店', '富山東': '富山東店', '富山': '富山東店', '福井': '福井高柳店', '福井高柳': '福井高柳店', '金沢': '金沢本店' };
 function shiftFor(shifts, staffName, dateStr) {
   return shifts.find(function(s) { return nw(s.staff_name) === nw(staffName) && s.date === dateStr; });
 }
@@ -997,7 +997,9 @@ function shiftTagHtml(sh, codes) {
   if (sh.kind === 'off') return '<div class="shtag off">' + esc(sh.label || '休み') + '</div>';
   if (sh.kind === 'other') return '<div class="shtag oth">' + esc(sh.label || '') + '</div>';
   let t = '出勤';
-  if (sh.code) {
+  if (sh.start_time) {
+    t = sh.start_time + '-' + (sh.end_time || '') + (sh.start2 ? '/' + sh.start2 + '-' + (sh.end2 || '') : '');
+  } else if (sh.code) {
     const c = codes[sh.code];
     const times = codeTimes(c);
     t = sh.code + (times ? ' ' + times : '');
@@ -1011,11 +1013,13 @@ function shiftShadeHtml(sh, codes) {
   if (!sh) return '';
   if (sh.kind === 'off') return '<div class="shoff offday" style="left:0;width:100%">🌙 ' + esc(sh.label || '休み') + '</div>';
   if (sh.kind === 'other') return '<div class="shoff oth" style="left:0;width:100%">' + esc(sh.label || '') + '</div>';
-  const c = sh.code ? codes[sh.code] : null;
-  if (!c || !c.start_time) return '';
+  let src = null;
+  if (sh.start_time) src = sh;
+  else if (sh.code && codes[sh.code] && codes[sh.code].start_time) src = codes[sh.code];
+  if (!src) return '';
   // 勤務区間（中抜けシフトは2区間）の外側を斜線で塗る
-  const segs = [[hm2m(c.start_time), hm2m(c.end_time)]];
-  if (c.start2) segs.push([hm2m(c.start2), hm2m(c.end2)]);
+  const segs = [[hm2m(src.start_time), hm2m(src.end_time)]];
+  if (src.start2) segs.push([hm2m(src.start2), hm2m(src.end2)]);
   segs.sort(function(x, y) { return x[0] - y[0]; });
   let h = '';
   let cur = TL_START;
