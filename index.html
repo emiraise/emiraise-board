@@ -193,6 +193,7 @@
   <a class="brand" href="#/"><img src="logo.png" alt="Emiraise 顧客ボード" class="brandimg"></a>
   <a href="#/">予約</a>
   <a href="#/tl">タイムライン</a>
+  <a href="#/trial">体験</a>
   <a href="#/subs">月謝</a>
   <a href="#/report">日報</a>
   <a href="#/search">検索</a>
@@ -1814,6 +1815,79 @@ async function renderSubs(params) {
   app.innerHTML = html;
 }
 
+// ── 体験・初回レッスン予約（広告・Lステップの流入指標） ─────
+async function renderTrial() {
+  app.innerHTML = '<div class="empty">読み込み中…</div>';
+  const today = jstToday();
+  const from = addDays(today, -120);
+  const to = addDays(today, 92);
+  const { data, error } = await sb.from('crm_reservations').select('*')
+    .gte('booking_start', from + 'T00:00:00+09:00').lt('booking_start', to + 'T00:00:00+09:00')
+    .eq('status', 'accepted')
+    .or('menu.ilike.%初回%,menu.ilike.%体験%,menu.ilike.%キャンペーン%,menu.ilike.%かんざし%')
+    .order('booking_start', { ascending: false }).limit(500);
+  if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
+  const rows = data || [];
+  function isPortal(r) { return (r.menu || '').indexOf('かんざし') >= 0; }
+  const nowIso = new Date().toISOString();
+  const ym = today.slice(0, 7);
+  const lastYm = addDays(ym + '-01', -1).slice(0, 7);
+  const wkStart = weekStart(today);
+  const wkEnd = addDays(wkStart, 7);
+  function dOf(r) { return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start)); }
+  const camp = rows.filter(function(r) { return !isPortal(r); });
+  const cntThisM = camp.filter(function(r) { return dOf(r).slice(0, 7) === ym; }).length;
+  const cntLastM = camp.filter(function(r) { return dOf(r).slice(0, 7) === lastYm; }).length;
+  const cntWeek = camp.filter(function(r) { const d = dOf(r); return d >= wkStart && d < wkEnd; }).length;
+  const cntFuture = camp.filter(function(r) { return r.booking_start >= nowIso; }).length;
+  const cntPortalM = rows.filter(function(r) { return isPortal(r) && dOf(r).slice(0, 7) === ym; }).length;
+
+  let html = '<h2>🎫 体験・初回レッスン予約（広告/Lステップ流入の指標）</h2>';
+  html += '<div class="chips">'
+    + '<a style="pointer-events:none">今月 ' + cntThisM + '件</a>'
+    + '<a style="pointer-events:none">先月 ' + cntLastM + '件</a>'
+    + '<a style="pointer-events:none">今週 ' + cntWeek + '件</a>'
+    + '<a style="pointer-events:none;background:var(--accent);color:#fff">🆕 これからの体験 ' + cntFuture + '件</a>'
+    + '<a style="pointer-events:none">🔖 かんざし経由 今月' + cntPortalM + '件</a>'
+    + '</div>';
+  // 店舗別（今月）
+  const byStore = {};
+  camp.forEach(function(r) { if (dOf(r).slice(0, 7) === ym) byStore[r.store_tag || '店舗不明'] = (byStore[r.store_tag || '店舗不明'] || 0) + 1; });
+  html += '<div class="chips">';
+  Object.keys(byStore).sort().forEach(function(st) {
+    html += '<a style="pointer-events:none">' + esc(st) + ' 今月' + byStore[st] + '件</a>';
+  });
+  html += '</div>';
+
+  if (!rows.length) {
+    html += '<div class="empty">対象期間に体験予約はありません</div>';
+  } else {
+    html += '<div class="card">';
+    let curYm2 = '';
+    rows.forEach(function(r) {
+      const d = dOf(r);
+      if (d.slice(0, 7) !== curYm2) {
+        curYm2 = d.slice(0, 7);
+        const mcount = rows.filter(function(x) { return dOf(x).slice(0, 7) === curYm2; }).length;
+        html += '<div class="mhead">' + parseInt(curYm2.slice(0, 5), 10) + '年' + parseInt(curYm2.slice(5, 7), 10) + '月　' + mcount + '件</div>';
+      }
+      const future = r.booking_start >= nowIso;
+      html += '<div class="hist">'
+        + '<span class="d' + (future ? ' future' : '') + '">' + fmtDate(r.booking_start) + '</span>'
+        + '<span>' + fmtTime(r.booking_start) + '</span>'
+        + '<a style="flex:1;color:var(--accent);text-decoration:none;font-weight:700" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
+        + '<span class="badge" style="background:' + storeColor(r.store_tag) + ';font-size:10px">' + esc(r.store_tag || '') + '</span>'
+        + '<span style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
+        + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖 かんざし</span>' : '')
+        + (future ? '<span class="pill">🆕 予定</span>' : '<span class="pill" style="background:#dde6e0">来店済</span>')
+        + '</div>';
+    });
+    html += '</div>';
+    html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の確定予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
+  }
+  app.innerHTML = html;
+}
+
 // ── ルーター ──────────────────────────────
 async function render() {
   const { data } = await sb.auth.getSession();
@@ -1842,6 +1916,7 @@ async function render() {
     renderReport(new URLSearchParams(hash.split('?')[1] || ''));
     return;
   }
+  if (hash.indexOf('#/trial') === 0) { renderTrial(); return; }
   if (hash.indexOf('#/subs') === 0) {
     renderSubs(new URLSearchParams(hash.split('?')[1] || ''));
     return;
