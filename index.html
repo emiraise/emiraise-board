@@ -280,6 +280,10 @@ function qaItems(arr) {
 
 // ── ログイン ──────────────────────────────
 function renderLogin(msg) {
+  if (!msg && location.hash.indexOf('otp_expired') >= 0) {
+    msg = 'メールのリンクが期限切れか使用済みです。もう一度メールアドレスを入力して「パスワードを忘れた場合」を押し、新しく届いたメールのリンクを開いてください（一番新しいメールを使ってください）。';
+    location.hash = '';
+  }
   topbar.hidden = true;
   app.innerHTML = '<div class="login-wrap"><div class="card">'
     + '<h2>スタッフログイン</h2>'
