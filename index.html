@@ -1825,7 +1825,7 @@ async function renderTrial() {
   const { data, error } = await sb.from('crm_reservations').select('*')
     .gte('booking_start', from + 'T00:00:00+09:00').lt('booking_start', to + 'T00:00:00+09:00')
     .eq('status', 'accepted')
-    .or('menu.ilike.%初回%,menu.ilike.%体験%,menu.ilike.%キャンペーン%,menu.ilike.%かんざし%')
+    .or('menu.ilike.%初回%,menu.ilike.%体験%,menu.ilike.%キャンペーン%,menu.ilike.%かんざし%,customer_name.ilike.%新規%,customer_name.ilike.%体験%')
     .order('booking_start', { ascending: false }).limit(500);
   if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
   const rows = data || [];
