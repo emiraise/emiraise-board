@@ -212,6 +212,18 @@ const sb = createClient(SB_URL, SB_KEY);
 const app = document.getElementById('app');
 const topbar = document.getElementById('topbar');
 document.getElementById('logoutBtn').onclick = async () => { await sb.auth.signOut(); location.hash = ''; render(); };
+sb.auth.onAuthStateChange(function(event) {
+  if (event !== 'PASSWORD_RECOVERY') return;
+  setTimeout(function() {
+    const p = prompt('メールの確認ができました。新しいパスワードを入力してください（8文字以上・自分だけが知るものに）');
+    if (p === null) return;
+    if (p.length < 8) { alert('8文字以上にしてください。右上の🔑ボタンからやり直せます。'); return; }
+    sb.auth.updateUser({ password: p }).then(function(res) {
+      alert(res.error ? '設定できませんでした: ' + res.error.message : '新しいパスワードを設定しました。次回からこのパスワードでログインできます（ブラウザが保存を聞いてきたら「保存」を推奨）。');
+      location.hash = '#/'; render();
+    });
+  }, 400);
+});
 document.getElementById('pwBtn').onclick = async function() {
   const p = prompt('新しいパスワードを入力してください（8文字以上・自分だけが知るものに）');
   if (p === null) return;
@@ -275,9 +287,18 @@ function renderLogin(msg) {
     + '<input id="em" type="email" placeholder="メールアドレス" autocomplete="username">'
     + '<input id="pw" type="password" placeholder="パスワード" autocomplete="current-password">'
     + '<button class="btn" id="loginBtn">ログイン</button>'
+    + '<button id="forgotBtn" style="margin-top:10px;background:none;border:none;color:var(--sub);font-size:12px;text-decoration:underline;cursor:pointer;width:100%">パスワードを忘れた場合（再設定メールを送る）</button>'
     + '</div></div>';
   document.getElementById('loginBtn').onclick = doLogin;
   document.getElementById('pw').addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
+  document.getElementById('forgotBtn').onclick = async function() {
+    const em = document.getElementById('em').value.trim();
+    if (!em) { renderLogin('先にメールアドレス欄を入力してから「パスワードを忘れた場合」を押してください。'); return; }
+    this.disabled = true;
+    const { error } = await sb.auth.resetPasswordForEmail(em, { redirectTo: location.origin + location.pathname });
+    if (error) { renderLogin('再設定メールを送れませんでした: ' + error.message); return; }
+    renderLogin('再設定メールを ' + em + ' に送りました。メール内のリンクを開くと、新しいパスワードを設定できます（届くまで1〜2分かかることがあります。迷惑メールも確認してください）。');
+  };
 }
 async function doLogin() {
   const em = document.getElementById('em').value.trim();
