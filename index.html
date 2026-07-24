@@ -146,6 +146,7 @@
   .rep th, .rep td { border:1px solid var(--line); padding:8px 6px; text-align:right; white-space:nowrap; }
   .rep th:first-child, .rep td:first-child { text-align:left; position:sticky; left:0; background:#fff; }
   .rep thead th { background:#eef3f1; text-align:center; }
+  .subnote { width:100%; min-width:150px; border:1px solid var(--line); border-radius:8px; padding:5px 7px; font-size:12px; background:#fff; }
   .rep .tot td { font-weight:700; background:#fafcfb; }
   .bar { height:6px; background:#e8eeec; border-radius:4px; overflow:hidden; margin-top:3px; }
   .bar span { display:block; height:100%; background:var(--accent); }
@@ -256,7 +257,9 @@ function addDays(dstr, n) {
   return new Intl.DateTimeFormat('sv-SE', { timeZone:TZ }).format(d);
 }
 const STORE_COLORS = ['#2f6f5f', '#5a67a5', '#b0743a', '#8a5aa5', '#3a7fb0'];
+const STORE_COLOR_MAP = { '金沢本店': '#b04a4a', '金沢駅西店': '#2f6f5f', '富山東店': '#5a67a5', '福井高柳店': '#b0743a', '天王寺店': '#8a5aa5' };
 function storeColor(tag) {
+  if (STORE_COLOR_MAP[tag]) return STORE_COLOR_MAP[tag];
   let h = 0; const s = String(tag || '');
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return STORE_COLORS[h % STORE_COLORS.length];
@@ -1658,13 +1661,19 @@ async function renderReport(params) {
   // フォロー対象（期間に関係なく現時点の全顧客から自動抽出 = LTV対策リスト）
   const [statsAll, custAll] = await Promise.all([
     sb.from('crm_customer_stats').select('*').limit(2000),
-    sb.from('crm_customers').select('merchant_id,customer_id,name,ticket_books').limit(2000),
+    sb.from('crm_customers').select('merchant_id,customer_id,name,ticket_books,subscriptions').limit(2000),
   ]);
   const nameOf = {};
-  (custAll.data || []).forEach(function(cu) { nameOf[custKey(cu.merchant_id, cu.customer_id)] = cu.name || ''; });
+  const hasSub = {};
+  (custAll.data || []).forEach(function(cu) {
+    const k = custKey(cu.merchant_id, cu.customer_id);
+    nameOf[k] = cu.name || '';
+    if ((cu.subscriptions || []).length > 0) hasSub[k] = true;  // 休会中も含む＝契約歴のある月謝会員
+  });
 
   const riskList = [];
   (statsAll.data || []).forEach(function(st) {
+    if (!hasSub[custKey(st.merchant_id, st.customer_id)]) return;  // 体験のみ等は除外（大地さん指示 2026-07-25）
     if (st.next_visit || !st.last_visit) return;
     const gap = daysBetween(st.last_visit, Date.now());
     const threshold = Math.max(21, (st.avg_interval_days || 14) * 1.5);
@@ -1682,7 +1691,7 @@ async function renderReport(params) {
   });
 
   html += '<div class="card" style="margin-top:12px"><h2>🔴 フォロー対象（自動抽出・現時点）</h2>';
-  html += '<h3>離脱注意（次回予約なし・来店ペース超過）　<small style="color:var(--sub);font-weight:400">🔴=優先フォロー／🟡=長期のお客様（15回以上）はゆるやかに様子見</small></h3>';
+  html += '<h3>離脱注意（次回予約なし・来店ペース超過）　<small style="color:var(--sub);font-weight:400">月謝会員（休会含む）のみ・🔴=優先フォロー／🟡=長期のお客様（15回以上）はゆるやかに様子見</small></h3>';
   if (!riskList.length) html += '<div class="empty" style="padding:8px 0">現在該当なし 🎉</div>';
   riskList.slice(0, 15).forEach(function(x) {
     const k = custKey(x.st.merchant_id, x.st.customer_id);
@@ -1750,11 +1759,14 @@ async function renderSubs(params) {
   const afterNextFirst = addDays(nextYm + '-' + String(nextDim).padStart(2, '0'), 1);
   const nowIso = new Date().toISOString();
 
-  const [custQ, resQ] = await Promise.all([
+  const [custQ, resQ, noteQ] = await Promise.all([
     sb.from('crm_customers').select('merchant_id,customer_id,name,merchant_name,subscriptions').limit(2000),
     fetchRange(first, afterNextFirst),
+    sb.from('crm_subs_notes').select('*').limit(2000),
   ]);
   if (custQ.error || resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー</div>'; return; }
+  const subNotes = {};
+  (noteQ.data || []).forEach(function(n) { subNotes[custKey(n.merchant_id, n.customer_id)] = n.note || ''; });
 
   // 顧客ごとに当月・翌月の予約数と当月消化数を数える
   const cnt = {};
@@ -1817,7 +1829,7 @@ async function renderSubs(params) {
   html += '<div style="color:var(--sub);font-size:12px;margin-bottom:8px">当月＝今月中の予約状況（消化済み含む）／翌月＝毎月10日の予約開放後にチェック。15日頃の確認がおすすめです</div>';
 
   html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
-    + '<th>お客様</th><th>コース</th><th>当月（消化/予約/枠）</th><th>翌月' + nmo + '月（予約/枠）</th></tr></thead><tbody>';
+    + '<th>お客様</th><th>コース</th><th>当月（消化/予約/枠）</th><th>翌月' + nmo + '月（予約/枠）</th><th style="min-width:170px">備考</th></tr></thead><tbody>';
   let curStore = '';
   list.forEach(function(x) {
     if (x.stTag !== curStore) {
@@ -1826,7 +1838,7 @@ async function renderSubs(params) {
       const r = inStore.filter(function(y) { return y.sev >= 3; }).length;
       const yl = inStore.filter(function(y) { return y.sev === 2 || y.sev === 1; }).length;
       const g = inStore.filter(function(y) { return y.sev === 0; }).length;
-      html += '<tr><td colspan="4" style="text-align:left;background:#d8e2dc;font-weight:800;font-size:13.5px">'
+      html += '<tr><td colspan="5" style="text-align:left;background:#d8e2dc;font-weight:800;font-size:13.5px">'
         + '🏬 ' + esc(curStore) + '　会員' + inStore.length + '名（🔴' + r + '・🟡' + yl + '・🟢' + g + '）</td></tr>';
     }
     html += '<tr>'
@@ -1834,10 +1846,25 @@ async function renderSubs(params) {
       + '<td>月' + x.N + '回</td>'
       + '<td style="text-align:left">' + x.stThis.icon + ' ' + x.c.thisV + '/' + x.c.thisB + '/' + x.N + '　' + esc(x.stThis.text) + '</td>'
       + '<td style="text-align:left">' + x.stNext.icon + ' ' + x.c.nextB + '/' + x.N + '　' + esc(x.stNext.text) + '</td>'
+      + '<td style="text-align:left"><input class="subnote" data-mid="' + esc(x.cu.merchant_id) + '" data-cid="' + x.cu.customer_id + '" value="' + esc(subNotes[custKey(x.cu.merchant_id, x.cu.customer_id)] || '') + '" placeholder="メモを入力…"></td>'
       + '</tr>';
   });
   html += '</tbody></table></div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">備考はその場で入力→欄の外をタップ（またはEnter）で自動保存。回数が枠と合わない理由などをお客様ごとにメモできます</div>';
   app.innerHTML = html;
+  const who = await myStaffName();
+  app.querySelectorAll('.subnote').forEach(function(inp) {
+    inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') inp.blur(); });
+    inp.addEventListener('change', async function() {
+      const { error } = await sb.from('crm_subs_notes').upsert({
+        merchant_id: inp.dataset.mid, customer_id: parseInt(inp.dataset.cid, 10),
+        note: inp.value.trim(), updated_by: who || '', updated_at: new Date().toISOString()
+      });
+      inp.style.boxShadow = error ? '0 0 0 2px #b3261e' : '0 0 0 2px #4a8f6e';
+      setTimeout(function() { inp.style.boxShadow = ''; }, 1200);
+      if (error) alert('保存できませんでした: ' + error.message);
+    });
+  });
 }
 
 // ── 体験・初回レッスン予約（広告・Lステップの流入指標） ─────
