@@ -108,6 +108,10 @@
   .row { box-shadow:0 1px 3px rgba(20,45,35,.04); }
   .btn { background:linear-gradient(120deg, var(--accent), #2c8a6a); box-shadow:0 1px 4px rgba(18,70,58,.25); }
   .listcols { columns: 3 340px; column-gap:12px; }
+  .storecols { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:12px; align-items:start; }
+  @media (min-width: 1600px) { .storecols { grid-template-columns:repeat(5, 1fr); } }
+  .storecols .grp { margin-bottom:8px; }
+  .store-head { font-weight:800; font-size:14px; color:#fff; padding:6px 12px; border-radius:10px; margin:6px 2px 7px; }
   .listcols .grp { break-inside:avoid; margin-bottom:8px; }
   .listcols .row { padding:7px 9px; border-radius:10px; gap:8px; }
   .listcols .rowwrap { margin-bottom:5px; gap:5px; }
@@ -379,12 +383,23 @@ async function renderDay(dateStr) {
     dayShiftsL.filter(function(s) { return s.kind === 'off'; }).forEach(function(s) {
       html += '<a class="offchip">🌙 ' + esc(s.staff_name) + ' ' + esc(s.label || '休み') + '</a>';
     });
-    html += '</div><div class="listcols">';
-    gnames.forEach(function(st) {
-      const rows = groups[st];
-      html += '<div class="grp"><div class="staff-head">' + esc(st) + ' <span class="cnt">' + rows.length + '件</span></div>';
+    html += '</div><div class="storecols">';
+    // 店舗ごとの列（左から固定順・大地さん指定 2026-07-25）
+    const STORE_ORDER = ['金沢本店', '金沢駅西店', '富山東店', '福井高柳店', '天王寺店'];
+    const byStore = {};
+    data.forEach(function(r) {
+      const k = r.store_tag || '店舗不明';
+      (byStore[k] = byStore[k] || []).push(r);
+    });
+    const storeCols = STORE_ORDER.slice();
+    Object.keys(byStore).forEach(function(k) { if (storeCols.indexOf(k) < 0) storeCols.push(k); });
+    storeCols.forEach(function(stk) {
+      const rows = byStore[stk] || [];
+      html += '<div class="grp"><div class="store-head" style="background:' + storeColor(stk) + '">🏬 ' + esc(stk) + '　' + rows.length + '件</div>';
+      if (!rows.length) html += '<div class="empty" style="padding:8px 4px;font-size:12px">予約なし</div>';
       rows.forEach(function(r) {
         const ck = checks[r.reservation_id];
+        const stf = (r.staff_names || []).join('・') || '担当未設定';
         html += '<div class="rowwrap">'
           + '<button class="ck' + (ck ? ' on' : '') + '" data-rid="' + r.reservation_id + '" title="' + (ck ? esc((ck.checked_by_name || '') + ' が確認済み') : '見た印を付ける') + '">✓</button>'
           + '<a class="row" style="flex:1;margin-bottom:0" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">'
@@ -393,7 +408,7 @@ async function renderDay(dateStr) {
           + (rowNextAction(r, meta) ? '<div class="nx">📌 ' + esc(rowNextAction(r, meta)) + '</div>' : '')
           + '</span>'
           + '<span class="menu">' + esc(r.menu || '') + '</span>'
-          + '<span class="badge" style="background:' + storeColor(r.store_tag) + '">' + esc(r.store_tag || '') + '</span>'
+          + '<span class="badge" style="background:' + storeColor(r.store_tag) + '">' + esc(stf) + '</span>'
           + '</a></div>';
       });
       html += '</div>';
