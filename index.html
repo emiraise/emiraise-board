@@ -113,8 +113,12 @@
   @media (max-width: 700px) { .storecols { grid-template-columns:1fr; } }
   .storecols .grp { margin-bottom:8px; min-width:0; }
   .storecols .row { min-width:0; }
-  .storecols .cust { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .storecols .menu { max-width:26%; }
+  .storecols .cust { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+  .storecols .time { min-width:34px; font-size:11.5px; }
+  .storecols .menu { max-width:24%; font-size:10px; }
+  .storecols .badge { font-size:9.5px; padding:2px 6px; }
+  .storecols .ck { width:28px; flex:0 0 28px; font-size:12px; }
+  .storecols .row { padding:6px 7px; gap:6px; }
   .store-head { font-weight:800; font-size:14px; color:#fff; padding:6px 12px; border-radius:10px; margin:6px 2px 7px; }
   .listcols .grp { break-inside:avoid; margin-bottom:8px; }
   .listcols .row { padding:7px 9px; border-radius:10px; gap:8px; }
@@ -154,6 +158,17 @@
   .rep th, .rep td { border:1px solid var(--line); padding:8px 6px; text-align:right; white-space:nowrap; }
   .rep th:first-child, .rep td:first-child { text-align:left; position:sticky; left:0; background:#fff; }
   .rep thead th { background:#eef3f1; text-align:center; }
+  .moncal { position:absolute; z-index:60; background:var(--bg, #fff); border:1px solid var(--line); border-radius:14px; padding:10px; box-shadow:0 8px 24px rgba(0,0,0,.18); }
+  .moncal .mc-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px; }
+  .moncal .mc-head button { border:none; background:none; font-size:16px; cursor:pointer; padding:2px 10px; }
+  .moncal .mc-grid { display:grid; grid-template-columns:repeat(7, 34px); gap:2px; }
+  .moncal .mc-w { text-align:center; font-size:11px; color:var(--sub); padding:2px 0; }
+  .moncal .mc-d { border:none; background:none; border-radius:8px; padding:6px 0; font-size:12.5px; cursor:pointer; }
+  .moncal .mc-d:hover { background:#d8e2dc; }
+  .moncal .mc-d.sel { background:var(--accent); color:#fff; font-weight:700; }
+  .moncal .mc-d.tod:not(.sel) { box-shadow:inset 0 0 0 1.5px var(--accent); }
+  .moncal .sat { color:#3a7fb0; }
+  .moncal .sun { color:#b3261e; }
   .subnote { width:100%; min-width:150px; border:1px solid var(--line); border-radius:8px; padding:5px 7px; font-size:12px; background:#fff; }
   .rep .tot td { font-weight:700; background:#fafcfb; }
   .bar { height:6px; background:#e8eeec; border-radius:4px; overflow:hidden; margin-top:3px; }
@@ -272,6 +287,60 @@ function storeColor(tag) {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return STORE_COLORS[h % STORE_COLORS.length];
 }
+// 月曜始まりの日付ピッカー（ブラウザ内蔵カレンダーは日曜始まり固定のため自作・大地さん要望 2026-07-25）
+function attachMonCal(inp, onPick) {
+  inp.readOnly = true;
+  let pop = null;
+  function close() { if (pop) { pop.remove(); pop = null; } }
+  inp.addEventListener('click', function(e) {
+    e.preventDefault();
+    if (pop) { close(); return; }
+    let cur = (inp.value || jstToday()).slice(0, 7);
+    pop = document.createElement('div');
+    pop.className = 'moncal';
+    function draw() {
+      const y = parseInt(cur.slice(0, 4), 10), m = parseInt(cur.slice(5, 7), 10);
+      let h = '<div class="mc-head"><button type="button" data-n="-1">‹</button><b>' + y + '年' + m + '月</b><button type="button" data-n="1">›</button></div><div class="mc-grid">';
+      ['月', '火', '水', '木', '金', '土', '日'].forEach(function(w, i) {
+        h += '<span class="mc-w' + (i === 5 ? ' sat' : (i === 6 ? ' sun' : '')) + '">' + w + '</span>';
+      });
+      const shift = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+      const dim = new Date(y, m, 0).getDate();
+      for (let i = 0; i < shift; i++) h += '<span></span>';
+      const todayS = jstToday();
+      for (let d = 1; d <= dim; d++) {
+        const ds = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        const wd = (shift + d - 1) % 7;
+        h += '<button type="button" class="mc-d' + (ds === inp.value ? ' sel' : '') + (ds === todayS ? ' tod' : '') + (wd === 5 ? ' sat' : (wd === 6 ? ' sun' : '')) + '" data-d="' + ds + '">' + d + '</button>';
+      }
+      pop.innerHTML = h + '</div>';
+    }
+    draw();
+    const rc = inp.getBoundingClientRect();
+    pop.style.left = (rc.left + window.scrollX) + 'px';
+    pop.style.top = (rc.bottom + window.scrollY + 4) + 'px';
+    document.body.appendChild(pop);
+    pop.addEventListener('click', function(ev) {
+      const b = ev.target.closest('button');
+      if (!b) return;
+      if (b.dataset.n) {
+        const ny = parseInt(cur.slice(0, 4), 10);
+        const nm = parseInt(cur.slice(5, 7), 10) + parseInt(b.dataset.n, 10);
+        const nd = new Date(ny, nm - 1, 1);
+        cur = nd.getFullYear() + '-' + String(nd.getMonth() + 1).padStart(2, '0');
+        draw();
+      } else if (b.dataset.d) {
+        const v = b.dataset.d; close(); onPick(v);
+      }
+    });
+    setTimeout(function() {
+      document.addEventListener('click', function h2(ev) {
+        if (pop && !pop.contains(ev.target) && ev.target !== inp) { close(); document.removeEventListener('click', h2); }
+      });
+    }, 0);
+  });
+}
+
 function qaItems(arr) {
   // profile_fields / questionnaires から {question, answer} を汎用に取り出す
   const out = [];
@@ -350,7 +419,7 @@ async function renderDay(dateStr) {
 
   let html = '<div class="daynav">'
     + '<button id="prevD">←</button>'
-    + '<input type="date" id="dayPick" value="' + d + '">'
+    + '<input type="text" id="dayPick" value="' + d + '">'
     + '<button id="nextD">→</button>'
     + '<button id="todayD">今日</button>'
     + '</div>';
@@ -404,6 +473,7 @@ async function renderDay(dateStr) {
       rows.forEach(function(r) {
         const ck = checks[r.reservation_id];
         const stf = (r.staff_names || []).join('・') || '担当未設定';
+        const menuTxt = /会員の方はこちら|会員様はこちら/.test(r.menu || '') ? '' : (r.menu || '');
         html += '<div class="rowwrap">'
           + '<button class="ck' + (ck ? ' on' : '') + '" data-rid="' + r.reservation_id + '" title="' + (ck ? esc((ck.checked_by_name || '') + ' が確認済み') : '見た印を付ける') + '">✓</button>'
           + '<a class="row" style="flex:1;margin-bottom:0" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">'
@@ -411,7 +481,7 @@ async function renderDay(dateStr) {
           + '<span class="cust">' + (karteToday[custKey(r.merchant_id, r.customer_id)] ? '📝' : '') + rowBadges(r, meta) + esc(r.customer_name || '（名前なし）')
           + (rowNextAction(r, meta) ? '<div class="nx">📌 ' + esc(rowNextAction(r, meta)) + '</div>' : '')
           + '</span>'
-          + '<span class="menu">' + esc(r.menu || '') + '</span>'
+          + (menuTxt ? '<span class="menu">' + esc(menuTxt) + '</span>' : '')
           + '<span class="badge" style="background:' + storeColor(r.store_tag) + '">' + esc(stf) + '</span>'
           + '</a></div>';
       });
@@ -423,7 +493,7 @@ async function renderDay(dateStr) {
   document.getElementById('prevD').onclick = function() { location.hash = '#/?date=' + addDays(d, -1); };
   document.getElementById('nextD').onclick = function() { location.hash = '#/?date=' + addDays(d, 1); };
   document.getElementById('todayD').onclick = function() { location.hash = '#/'; };
-  document.getElementById('dayPick').onchange = function(e) { location.hash = '#/?date=' + e.target.value; };
+  attachMonCal(document.getElementById('dayPick'), function(v) { location.hash = '#/?date=' + v; });
   Array.prototype.forEach.call(document.querySelectorAll('.ck'), function(btn) {
     btn.onclick = async function() {
       const rid = btn.getAttribute('data-rid');
@@ -1369,7 +1439,7 @@ async function renderTimeline(params) {
     let html = tlTabsHtml('day', date, staff);
     html += '<div class="selbar">'
       + '<button id="tlPrev">←</button>'
-      + '<input type="date" id="tlDate" value="' + date + '">'
+      + '<input type="text" id="tlDate" value="' + date + '">'
       + '<button id="tlNext">→</button>'
       + '<button id="tlToday">今日</button>'
       + '<span style="font-weight:700">' + fmtMD(date) + '　' + rows.length + '件</span>'
@@ -1433,7 +1503,7 @@ async function renderTimeline(params) {
     document.getElementById('tlPrev').onclick = function() { location.hash = tlHash('day', { date: addDays(date, -1), store: storeSel }); };
     document.getElementById('tlNext').onclick = function() { location.hash = tlHash('day', { date: addDays(date, 1), store: storeSel }); };
     document.getElementById('tlToday').onclick = function() { location.hash = tlHash('day', {}); };
-    document.getElementById('tlDate').onchange = function(e) { location.hash = tlHash('day', { date: e.target.value, store: storeSel }); };
+    attachMonCal(document.getElementById('tlDate'), function(v) { location.hash = tlHash('day', { date: v, store: storeSel }); });
     return;
   }
 
