@@ -336,6 +336,7 @@ function attachMonCal(inp, onPick) {
     });
     setTimeout(function() {
       document.addEventListener('click', function h2(ev) {
+        if (!ev.target.isConnected) return;  // ‹›で描き直した直後の旧ボタンは外側クリック扱いにしない
         if (pop && !pop.contains(ev.target) && ev.target !== inp) { close(); document.removeEventListener('click', h2); }
       });
     }, 0);
