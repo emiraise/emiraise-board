@@ -1987,9 +1987,13 @@ async function renderStats(params) {
   const todayS = jstToday();
   const thisWk = weekStart(todayS);
 
-  const res = await fetchRange(first, nextFirst);
+  const [res, custQ] = await Promise.all([
+    fetchRange(first, nextFirst),
+    sb.from('crm_customers').select('merchant_id,customer_id,merchant_name,subscriptions').limit(2000),
+  ]);
   if (res.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(res.error.message) + '</div>'; return; }
   const rows = res.data || [];
+  const custs = custQ.data || [];
 
   // 月内の週（月曜始まり）を列にする
   const weeks = [];
@@ -2028,6 +2032,81 @@ async function renderStats(params) {
   });
   html += '</div>';
 
+  // ── 店舗サマリー（レッスン・会員・体験→成約・退会） ──
+  const subsOf = {};   // custKey → subscriptions
+  const storeOfCust = {};
+  custs.forEach(function(cu) {
+    const k = custKey(cu.merchant_id, cu.customer_id);
+    subsOf[k] = cu.subscriptions || [];
+    storeOfCust[k] = ((cu.merchant_name || '').split(/[\s　]/).pop()) || '店舗不明';
+  });
+  function isTrialR(r) {
+    return /初回|体験|キャンペーン|かんざし/.test(r.menu || '') || /新規|体験/.test(r.customer_name || '');
+  }
+  const sm = {};
+  function smOf(st) { return (sm[st] = sm[st] || { lessons: 0, members: 0, susp: 0, quit: 0, trial: 0, conv: 0 }); }
+  rows.forEach(function(r) {
+    const st = r.store_tag || '店舗不明';
+    const o = smOf(st);
+    o.lessons++;
+    if (isTrialR(r) && r.booking_start < nowIso) {
+      o.trial++;
+      const subs = subsOf[custKey(r.merchant_id, r.customer_id)] || [];
+      if (subs.length > 0) o.conv++;
+    }
+  });
+  custs.forEach(function(cu) {
+    const st = storeOfCust[custKey(cu.merchant_id, cu.customer_id)];
+    let active = false, susp = false, quitInMonth = false;
+    (cu.subscriptions || []).forEach(function(sub) {
+      const end = (sub.contract_end_at || '').slice(0, 10);
+      if (end && end >= first && end < nextFirst) quitInMonth = true;
+      if (sub.contract_status === 'active' && !end) active = true;
+      if (sub.contract_status === 'suspended') susp = true;
+    });
+    if (active || susp || quitInMonth) {
+      const o = smOf(st);
+      if (active) o.members++;
+      else if (susp) o.susp++;
+      if (quitInMonth) o.quit++;
+    }
+  });
+  const smKeys = Object.keys(sm).filter(function(k) { return !storeSel || k === storeSel; })
+    .sort(function(a, b) { return sm[b].lessons - sm[a].lessons; });
+  if (smKeys.length) {
+    html += '<h3 style="margin:10px 2px 4px">🏬 店舗サマリー</h3>';
+    html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
+      + '<th>店舗</th><th>レッスン数</th><th>会員数</th><th>休会</th><th>体験来店</th><th>成約</th><th>成約率</th><th>退会</th><th>退会率</th></tr></thead><tbody>';
+    const tot = { lessons: 0, members: 0, susp: 0, quit: 0, trial: 0, conv: 0 };
+    smKeys.forEach(function(st) {
+      const o = sm[st];
+      Object.keys(tot).forEach(function(k2) { tot[k2] += o[k2]; });
+      const cvr = o.trial ? Math.round(o.conv * 100 / o.trial) : null;
+      const qr = (o.members + o.quit) ? Math.round(o.quit * 1000 / (o.members + o.quit)) / 10 : null;
+      html += '<tr><td><span class="badge" style="background:' + storeColor(st) + '">' + esc(st) + '</span></td>'
+        + '<td style="font-weight:700">' + o.lessons + '</td>'
+        + '<td>' + o.members + '名</td>'
+        + '<td>' + (o.susp || 0) + '名</td>'
+        + '<td>' + o.trial + '名</td>'
+        + '<td>' + o.conv + '名</td>'
+        + '<td>' + (cvr === null ? '<span style="color:#bbb">-</span>' : '<b>' + cvr + '%</b>') + '</td>'
+        + '<td>' + (o.quit ? '<span style="color:#b3261e;font-weight:700">' + o.quit + '名</span>' : '0名') + '</td>'
+        + '<td>' + (qr === null ? '<span style="color:#bbb">-</span>' : qr + '%') + '</td></tr>';
+    });
+    if (smKeys.length > 1) {
+      const tcvr = tot.trial ? Math.round(tot.conv * 100 / tot.trial) : null;
+      const tqr = (tot.members + tot.quit) ? Math.round(tot.quit * 1000 / (tot.members + tot.quit)) / 10 : null;
+      html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td><td>' + tot.lessons + '</td><td>' + tot.members + '名</td><td>' + tot.susp + '名</td>'
+        + '<td>' + tot.trial + '名</td><td>' + tot.conv + '名</td><td>' + (tcvr === null ? '-' : tcvr + '%') + '</td>'
+        + '<td>' + tot.quit + '名</td><td>' + (tqr === null ? '-' : tqr + '%') + '</td></tr>';
+    }
+    html += '</tbody></table></div>';
+    html += '<div style="color:var(--sub);font-size:11px;margin:4px 2px 12px">'
+      + '会員数=現在有効な月謝契約（休会は別枠）／体験来店=この月に来店済みの体験・初回のお客様／成約=そのうち現時点で月謝契約がある人（体験直後は未反映のことあり）／退会=この月に契約終了日がある人・退会率=退会÷(会員+退会)。'
+      + 'STORESにデータがある期間のみ正確です</div>';
+  }
+
+  html += '<h3 style="margin:10px 2px 4px">👤 スタッフ別レッスン数</h3>';
   if (!staffs.length) {
     html += '<div class="empty">この月のレッスンはありません</div>';
   } else {
