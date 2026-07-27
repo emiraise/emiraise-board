@@ -218,6 +218,7 @@
   <a href="#/">予約</a>
   <a href="#/tl">タイムライン</a>
   <a href="#/trial">体験</a>
+  <a href="#/stats">実績</a>
   <a href="#/subs">月謝</a>
   <a href="#/report">日報</a>
   <a href="#/search">検索</a>
@@ -1971,6 +1972,99 @@ async function renderSubs(params) {
   });
 }
 
+// ── スタッフ別レッスン実績（週×月の件数集計・除外名簿適用済み） ─────
+async function renderStats(params) {
+  app.innerHTML = '<div class="empty">読み込み中…</div>';
+  const ym = (params && params.get('month')) || jstToday().slice(0, 7);
+  const storeSel = (params && params.get('store')) || '';
+  const y = parseInt(ym.slice(0, 4), 10), mo = parseInt(ym.slice(5, 7), 10);
+  const dim = new Date(y, mo, 0).getDate();
+  const first = ym + '-01';
+  const nextFirst = addDays(ym + '-' + String(dim).padStart(2, '0'), 1);
+  const prevYm = addDays(first, -1).slice(0, 7);
+  const nextYm = nextFirst.slice(0, 7);
+  const nowIso = new Date().toISOString();
+  const todayS = jstToday();
+  const thisWk = weekStart(todayS);
+
+  const res = await fetchRange(first, nextFirst);
+  if (res.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(res.error.message) + '</div>'; return; }
+  const rows = res.data || [];
+
+  // 月内の週（月曜始まり）を列にする
+  const weeks = [];
+  for (let d = first; d < nextFirst; d = addDays(d, 1)) {
+    const w = weekStart(d);
+    if (weeks.indexOf(w) < 0) weeks.push(w);
+  }
+
+  const storeSet = {};
+  const perStaff = {};
+  rows.forEach(function(r) {
+    const st = r.store_tag || '店舗不明';
+    storeSet[st] = true;
+    if (storeSel && st !== storeSel) return;
+    (r.staff_names && r.staff_names.length ? r.staff_names : ['担当未設定']).forEach(function(sn) {
+      const o = (perStaff[sn] = perStaff[sn] || { total: 0, done: 0, wk: {}, wkDone: {} });
+      const d = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start));
+      const w = weekStart(d);
+      o.total++;
+      o.wk[w] = (o.wk[w] || 0) + 1;
+      if (r.booking_start < nowIso) { o.done++; o.wkDone[w] = (o.wkDone[w] || 0) + 1; }
+    });
+  });
+  const staffs = Object.keys(perStaff).sort(function(a, b) { return perStaff[b].total - perStaff[a].total || a.localeCompare(b, 'ja'); });
+
+  let html = '<h2>📊 スタッフ別レッスン実績（' + y + '年' + mo + '月' + (storeSel ? '・' + esc(storeSel) : '') + '）</h2>';
+  html += '<div class="daynav">'
+    + '<button id="stPrev">← ' + parseInt(prevYm.slice(5, 7), 10) + '月</button>'
+    + '<b style="font-size:15px">' + y + '年' + mo + '月</b>'
+    + '<button id="stNext">' + parseInt(nextYm.slice(5, 7), 10) + '月 →</button>'
+    + (ym !== jstToday().slice(0, 7) ? '<button id="stNow">今月</button>' : '')
+    + '</div>';
+  html += '<div class="chips"><a class="' + (storeSel ? '' : 'on') + '" href="#/stats?month=' + ym + '">全店</a>';
+  Object.keys(storeSet).sort().forEach(function(st) {
+    html += '<a class="' + (storeSel === st ? 'on' : '') + '" href="#/stats?month=' + ym + '&store=' + encodeURIComponent(st) + '">' + esc(st) + '</a>';
+  });
+  html += '</div>';
+
+  if (!staffs.length) {
+    html += '<div class="empty">この月のレッスンはありません</div>';
+  } else {
+    html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr><th>スタッフ</th>';
+    weeks.forEach(function(w) {
+      const wEnd = addDays(w, 6);
+      const label = parseInt(w.slice(5, 7), 10) + '/' + parseInt(w.slice(8, 10), 10) + '〜';
+      html += '<th' + (w === thisWk ? ' style="background:#d8e2dc"' : '') + '>' + label + (w === thisWk ? '<br><small>今週</small>' : '') + '</th>';
+    });
+    html += '<th>月合計</th><th>済 / 予定</th></tr></thead><tbody>';
+    let colTot = {};
+    let grandTotal = 0, grandDone = 0;
+    staffs.forEach(function(sn) {
+      const o = perStaff[sn];
+      html += '<tr><td>' + esc(sn) + '</td>';
+      weeks.forEach(function(w) {
+        const c = o.wk[w] || 0;
+        colTot[w] = (colTot[w] || 0) + c;
+        html += '<td' + (w === thisWk ? ' style="background:#eef3f1"' : '') + '>' + (c || '<span style="color:#bbb">0</span>') + '</td>';
+      });
+      grandTotal += o.total; grandDone += o.done;
+      html += '<td style="font-weight:800">' + o.total + '</td>'
+        + '<td>' + o.done + ' / ' + (o.total - o.done) + '</td></tr>';
+    });
+    html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td>';
+    weeks.forEach(function(w) { html += '<td>' + (colTot[w] || 0) + '</td>'; });
+    html += '<td>' + grandTotal + '</td><td>' + grandDone + ' / ' + (grandTotal - grandDone) + '</td></tr>';
+    html += '</tbody></table></div>';
+    html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">確定予約のみ・キャンセルとスタッフ内部予約（除外名簿）は含みません。週は月曜始まり。「済」は現時点で終了したレッスン、「予定」はこれからの予約。月合計はその月の1日〜末日のレッスン数です</div>';
+  }
+  app.innerHTML = html;
+  document.getElementById('stPrev').onclick = function() { location.hash = '#/stats?month=' + prevYm + (storeSel ? '&store=' + encodeURIComponent(storeSel) : ''); };
+  document.getElementById('stNext').onclick = function() { location.hash = '#/stats?month=' + nextYm + (storeSel ? '&store=' + encodeURIComponent(storeSel) : ''); };
+  const nowBtn = document.getElementById('stNow');
+  if (nowBtn) nowBtn.onclick = function() { location.hash = '#/stats'; };
+}
+
 // ── 体験・初回レッスン予約（広告・Lステップの流入指標） ─────
 async function renderTrial() {
   app.innerHTML = '<div class="empty">読み込み中…</div>';
@@ -2088,6 +2182,10 @@ async function render() {
     return;
   }
   if (hash.indexOf('#/trial') === 0) { renderTrial(); return; }
+  if (hash.indexOf('#/stats') === 0) {
+    renderStats(new URLSearchParams(hash.split('?')[1] || ''));
+    return;
+  }
   if (hash.indexOf('#/subs') === 0) {
     renderSubs(new URLSearchParams(hash.split('?')[1] || ''));
     return;
