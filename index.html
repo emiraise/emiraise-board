@@ -992,12 +992,21 @@ function filterExcl(rows, ex) {
   return (rows || []).filter(function(r) { return !ex[nw(r.customer_name || '')]; });
 }
 async function fetchRange(fromDate, toDateExcl) {
-  const res = await sb.from('crm_reservations').select('*')
-    .gte('booking_start', fromDate + 'T00:00:00+09:00')
-    .lt('booking_start', toDateExcl + 'T00:00:00+09:00')
-    .eq('status', 'accepted').order('booking_start').limit(2000);
-  if (res.data) res.data = filterExcl(res.data, await exclNames());
-  return res;
+  // 1回の読み込みは1000件で頭打ちになるため、全件揃うまでページ分割で取得する
+  // （8月後半の予約が切り捨てられ月謝タブが「予約ゼロ」誤表示になった障害の対策・2026-07-27）
+  let all = [];
+  for (let page = 0; page < 10; page++) {
+    const { data, error } = await sb.from('crm_reservations').select('*')
+      .gte('booking_start', fromDate + 'T00:00:00+09:00')
+      .lt('booking_start', toDateExcl + 'T00:00:00+09:00')
+      .eq('status', 'accepted')
+      .order('booking_start').order('reservation_id')
+      .range(page * 1000, page * 1000 + 999);
+    if (error) return { data: null, error: error };
+    all = all.concat(data || []);
+    if (!data || data.length < 1000) break;
+  }
+  return { data: filterExcl(all, await exclNames()), error: null };
 }
 // ── 見た印（対応済みチェック） ─────────────
 async function fetchChecks(fromDate, toDateExcl) {
