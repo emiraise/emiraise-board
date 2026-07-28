@@ -991,6 +991,19 @@ async function exclNames() {
 function filterExcl(rows, ex) {
   return (rows || []).filter(function(r) { return !ex[nw(r.customer_name || '')]; });
 }
+// 顧客系テーブルの全件取得（1000件上限のページ分割・顧客が1000名を超えても欠けない）
+async function fetchTable(table, sel) {
+  let all = [];
+  for (let page = 0; page < 10; page++) {
+    const { data, error } = await sb.from(table).select(sel)
+      .order('merchant_id').order('customer_id')
+      .range(page * 1000, page * 1000 + 999);
+    if (error) return { data: null, error: error };
+    all = all.concat(data || []);
+    if (!data || data.length < 1000) break;
+  }
+  return { data: all, error: null };
+}
 async function fetchRange(fromDate, toDateExcl) {
   // 1回の読み込みは1000件で頭打ちになるため、全件揃うまでページ分割で取得する
   // （8月後半の予約が切り捨てられ月謝タブが「予約ゼロ」誤表示になった障害の対策・2026-07-27）
@@ -1775,8 +1788,8 @@ async function renderReport(params) {
 
   // フォロー対象（期間に関係なく現時点の全顧客から自動抽出 = LTV対策リスト）
   const [statsAll, custAll] = await Promise.all([
-    sb.from('crm_customer_stats').select('*').limit(2000),
-    sb.from('crm_customers').select('merchant_id,customer_id,name,ticket_books,subscriptions').limit(2000),
+    fetchTable('crm_customer_stats', '*'),
+    fetchTable('crm_customers', 'merchant_id,customer_id,name,ticket_books,subscriptions'),
   ]);
   const nameOf = {};
   const hasSub = {};
@@ -1875,7 +1888,7 @@ async function renderSubs(params) {
   const nowIso = new Date().toISOString();
 
   const [custQ, resQ, noteQ] = await Promise.all([
-    sb.from('crm_customers').select('merchant_id,customer_id,name,merchant_name,subscriptions').limit(2000),
+    fetchTable('crm_customers', 'merchant_id,customer_id,name,merchant_name,subscriptions'),
     fetchRange(first, afterNextFirst),
     sb.from('crm_subs_notes').select('*').limit(2000),
   ]);
@@ -1999,7 +2012,7 @@ async function renderStats(params) {
 
   const [res, custQ] = await Promise.all([
     fetchRange(first, nextFirst),
-    sb.from('crm_customers').select('merchant_id,customer_id,merchant_name,subscriptions').limit(2000),
+    fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,subscriptions'),
   ]);
   if (res.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(res.error.message) + '</div>'; return; }
   const rows = res.data || [];
