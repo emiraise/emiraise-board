@@ -377,7 +377,7 @@ function renderLogin(msg) {
     + '<button id="forgotBtn" style="margin-top:10px;background:none;border:none;color:var(--sub);font-size:12px;text-decoration:underline;cursor:pointer;width:100%">パスワードを忘れた場合（再設定メールを送る）</button>'
     + '</div></div>';
   document.getElementById('loginBtn').onclick = doLogin;
-  document.getElementById('pw').addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
+  document.getElementById('pw').addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) doLogin(); });
   document.getElementById('forgotBtn').onclick = async function() {
     const em = document.getElementById('em').value.trim();
     if (!em) { renderLogin('先にメールアドレス欄を入力してから「パスワードを忘れた場合」を押してください。'); return; }
@@ -962,7 +962,7 @@ async function renderSearch(q) {
     if (v) { location.hash = '#/search?q=' + encodeURIComponent(v); }
   };
   document.getElementById('sBtn').onclick = go;
-  document.getElementById('sq').addEventListener('keydown', function(e) { if (e.key === 'Enter') go(); });
+  document.getElementById('sq').addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) go(); });
 
   if (q) {
     const like = '%' + q + '%';
@@ -2017,7 +2017,7 @@ async function renderSubs(params) {
   app.innerHTML = html;
   const who = await myStaffName();
   app.querySelectorAll('.subnote').forEach(function(inp) {
-    inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') inp.blur(); });
+    inp.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) inp.blur(); });
     inp.addEventListener('change', async function() {
       const { error } = await sb.from('crm_subs_notes').upsert({
         merchant_id: inp.dataset.mid, customer_id: parseInt(inp.dataset.cid, 10),
