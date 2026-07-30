@@ -552,6 +552,28 @@ async function renderCustomer(mid, cid) {
       hist = hist.concat(rs[i].data || []);
       karte = karte.concat(rs[i + 1].data || []);
     }
+  }
+  // 移行期の名寄せ: ワンモア時代とSTORESで顧客記録が分かれるため、
+  // 同じ名前（空白ゆれ含む）の予約を全システム横断で履歴に合流させる（2026-07-28）
+  {
+    const baseName = (c && c.name) || (hist[0] && hist[0].customer_name) || '';
+    if (baseName) {
+      const compact = nw(baseName);
+      const variants = [baseName, compact];
+      const m2 = baseName.match(/^(\S+)[\s　]+(\S+)$/);
+      if (m2) { variants.push(m2[1] + ' ' + m2[2]); variants.push(m2[1] + '　' + m2[2]); }
+      const uniqV = variants.filter(function(v, i2) { return v && variants.indexOf(v) === i2; });
+      const { data: sameName } = await sb.from('crm_reservations').select('*')
+        .in('customer_name', uniqV).order('booking_start', { ascending: false }).limit(200);
+      const seenIds = {};
+      hist.forEach(function(r) { seenIds[r.reservation_id] = true; });
+      (sameName || []).forEach(function(r) {
+        if (seenIds[r.reservation_id]) return;
+        if (r.merchant_id === mid && String(r.customer_id) === String(cid)) return;
+        seenIds[r.reservation_id] = true;
+        hist.push(r);
+      });
+    }
     hist.sort(function(a, b) { return a.booking_start < b.booking_start ? 1 : -1; });
     karte.sort(function(a, b) { return a.created_at < b.created_at ? 1 : -1; });
   }
