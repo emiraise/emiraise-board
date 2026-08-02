@@ -2119,7 +2119,14 @@ async function renderStats(params) {
                   'まこ': 100, '齋藤 良気': 100, 'ゆき': 120, '林　大地': 80, 'なおみ': 45 },
     fillTarget: 60,
     // 個人別のレッスン目標（全体60%より高い期待値を置く人・2026-08-02大地さん指示）
-    staffGoal: { 'こうじ': 120, 'まゆ': 110 }
+    staffGoal: { 'こうじ': 120, 'まゆ': 110 },
+    // 店舗損益モデル（2026-08-03・6月P&Lベースの概算。家賃実績は富山東のみ・他は推定→実額が分かり次第差し替え）
+    staffPay: { 'こうじ': 36, 'まゆ': 34, 'ねね': 30, 'あやな': 28, 'まこ': 24, 'ゆうか': 39, 'ゆき': 37,
+                'ももか': 27, '林　大地': 46, '齋藤 良気': 40, 'なおみ': 10 },  // 月額・社保込み概算(万円)
+    storeCost: { '金沢本店': { rent: 28, other: 22 }, '金沢駅西店': { rent: 22, other: 20 },
+                 '富山東店': { rent: 16.5, other: 20 }, '福井高柳店': { rent: 15, other: 15 },
+                 '天王寺店': { rent: 18, other: 18 } },  // 家賃・その他固定費(万円/月)
+    unitPrice: 0.874  // 実効単価(万円/レッスン・7月実績674万÷771レッスン)
   };
   function isTrialR0(r) {
     return /初回|体験|キャンペーン|かんざし/.test(r.menu || '') || /新規|体験/.test(r.customer_name || '');
@@ -2378,7 +2385,7 @@ async function renderStats(params) {
       Object.keys(tot).forEach(function(k2) { tot[k2] += o[k2]; });
       const cvr = o.trial ? Math.round(o.conv * 100 / o.trial) : null;
       const qr = (o.members + o.quit) ? Math.round(o.quit * 1000 / (o.members + o.quit)) / 10 : null;
-      html += '<tr><td><span class="badge" style="background:' + storeColor(st) + '">' + esc(st) + '</span></td>'
+      html += '<tr><td><a href="javascript:void(0)" class="plopen" data-st="' + esc(st) + '" style="text-decoration:none"><span class="badge" style="background:' + storeColor(st) + '">' + esc(st) + ' ▾</span></a></td>'
         + '<td style="font-weight:700">' + o.lessons + '</td>'
         + '<td>' + o.members + '名</td>'
         + '<td>' + (o.susp || 0) + '名</td>'
@@ -2396,6 +2403,47 @@ async function renderStats(params) {
         + '<td>' + tot.quit + '名</td><td>' + (tqr === null ? '-' : tqr + '%') + '</td></tr>';
     }
     html += '</tbody></table></div>';
+    // 店舗別 損益（店舗名をタップで展開・スタッフ給与はレッスン比率で店舗配賦）
+    const staffStore = {};
+    rows.forEach(function(r) {
+      const st = r.store_tag || '店舗不明';
+      (r.staff_names || []).forEach(function(sn) {
+        (staffStore[sn] = staffStore[sn] || {})[st] = (staffStore[sn][st] || 0) + 1;
+      });
+    });
+    html += '<div style="color:var(--sub);font-size:11.5px;margin:6px 2px">▼ 店舗名をタップすると損益（利益率）が開きます</div>';
+    smKeys.forEach(function(st) {
+      const o = sm[st];
+      const sales = Math.round(o.lessons * GOAL.unitPrice);
+      let pay = 0;
+      const payLines = [];
+      Object.keys(staffStore).forEach(function(sn) {
+        const atStore = staffStore[sn][st] || 0;
+        if (!atStore) return;
+        const totalSn = Object.keys(staffStore[sn]).reduce(function(a2, k2) { return a2 + staffStore[sn][k2]; }, 0);
+        const monthly = GOAL.staffPay[sn];
+        if (!monthly || !totalSn) return;
+        const alloc = Math.round(monthly * atStore / totalSn * 10) / 10;
+        pay += alloc;
+        payLines.push(esc(sn) + ' ' + alloc + '万(' + atStore + 'レッスン分)');
+      });
+      pay = Math.round(pay * 10) / 10;
+      const cost = GOAL.storeCost[st] || { rent: 0, other: 0 };
+      const profit = Math.round((sales - pay - cost.rent - cost.other) * 10) / 10;
+      const margin = sales ? Math.round(profit * 1000 / sales) / 10 : 0;
+      html += '<div class="plcard" data-st="' + esc(st) + '" style="display:none;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:6px 0">'
+        + '<div style="font-weight:800;margin-bottom:4px"><span class="badge" style="background:' + storeColor(st) + '">' + esc(st) + '</span> ' + mo + '月の店舗損益（概算）</div>'
+        + '<table class="rep" style="width:auto"><tbody>'
+        + '<tr><td style="text-align:left">売上（' + o.lessons + 'レッスン×実効単価8,740円）</td><td>' + sales + '万円</td></tr>'
+        + '<tr><td style="text-align:left">人件費（レッスン比率で配賦）</td><td>−' + pay + '万円</td></tr>'
+        + '<tr><td style="text-align:left">家賃</td><td>−' + cost.rent + '万円</td></tr>'
+        + '<tr><td style="text-align:left">その他固定費（光熱・消耗品・手数料等）</td><td>−' + cost.other + '万円</td></tr>'
+        + '<tr style="font-weight:800;background:#eef3f1"><td style="text-align:left">営業利益</td><td style="color:' + (profit >= 0 ? '#2e7d32' : '#b3261e') + '">' + (profit >= 0 ? '+' : '') + profit + '万円（利益率' + margin + '%）</td></tr>'
+        + '</tbody></table>'
+        + '<div style="color:var(--sub);font-size:11px;margin-top:4px">人件費内訳: ' + (payLines.join('／') || 'なし') + '<br>'
+        + '※家賃・固定費は概算（富山東のみP&L実績）。セミナー等・役員業務・本部費(和田さん等)は含みません。実額が分かれば差し替えます</div>'
+        + '</div>';
+    });
     html += '<div style="color:var(--sub);font-size:11px;margin:4px 2px 12px">'
       + '会員数=現在有効な月謝契約（休会は別枠）／体験来店=この月に来店済みの体験・初回のお客様／成約=そのうち現時点で月謝契約がある人（体験直後は未反映のことあり）／退会=この月に契約終了日がある人・退会率=退会÷(会員+退会)。'
       + 'STORESにデータがある期間のみ正確です</div>';
@@ -2438,6 +2486,12 @@ async function renderStats(params) {
     html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">確定予約のみ・キャンセルとスタッフ内部予約（除外名簿）は含みません。週は月曜始まり。「済」は現時点で終了したレッスン、「予定」はこれからの予約。月合計はその月の1日〜末日のレッスン数です</div>';
   }
   app.innerHTML = html;
+  app.querySelectorAll('.plopen').forEach(function(a) {
+    a.addEventListener('click', function() {
+      const card = app.querySelector('.plcard[data-st="' + a.dataset.st + '"]');
+      if (card) card.style.display = card.style.display === 'none' ? 'block' : 'none';
+    });
+  });
   app.querySelectorAll('.mgrck').forEach(function(ck) {
     ck.addEventListener('change', async function() {
       await sb.from('crm_manager_tasks').update({ done: ck.checked, done_at: ck.checked ? new Date().toISOString() : null }).eq('id', ck.dataset.id);
