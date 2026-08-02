@@ -2109,8 +2109,12 @@ async function renderStats(params) {
   // ── 🎯 目標ダッシュボード（月商1,000万への逆算・大地さん設計 2026-07-30） ──
   // 1,000万 ÷ 単価9,000円 = 1,111レッスン/月 ÷ 会員月3回 = 370名 ／ 稼働1,720枠×64.6% ＝ 1出勤5レッスン
   const GOAL = {
-    sales: 10000000, price: 9000, lessons: 1111, members: 370, perShift: 5, trialCvr: 0.5,
-    byStore: { '天王寺店': 140, '金沢本店': 300, '金沢駅西店': 300, '富山東店': 250, '福井高柳店': 120 }
+    sales: 10000000, price: 9000, lessons: 1111, members: 370, perShift: 5, trialCvr: 0.6,
+    byStore: { '天王寺店': 140, '金沢本店': 300, '金沢駅西店': 300, '富山東店': 250, '福井高柳店': 120 },
+    // 実拘束時間（月・大地さん申告 2026-08-02。みわさん退職・アコさん10月研修開始→4月正社員160）
+    staffHours: { 'こうじ': 160, 'まゆ': 160, 'ねね': 160, 'あやな': 160, 'ゆうか': 160, 'ももか': 160,
+                  'まこ': 100, '齋藤 良気': 100, 'ゆき': 120, '林　大地': 80, 'なおみ': 45 },
+    fillTarget: 60
   };
   function isTrialR0(r) {
     return /初回|体験|キャンペーン|かんざし/.test(r.menu || '') || /新規|体験/.test(r.customer_name || '');
@@ -2153,6 +2157,12 @@ async function renderStats(params) {
     + '<div style="font-size:22px;font-weight:800">' + curMembers + '名<small style="font-size:12px;color:var(--sub)"> / ' + GOAL.members + '名（あと' + memberGap + '名）</small></div>' + gbar(curMembers * 100 / GOAL.members, '#5a67a5') + '</div>';
   html += '<div><div style="color:var(--sub);font-size:12px">1出勤あたり平均レッスン</div>'
     + '<div style="font-size:22px;font-weight:800">' + (perShiftAvg === null ? '-' : perShiftAvg) + '<small style="font-size:12px;color:var(--sub)"> / 目標' + GOAL.perShift + '（出勤' + workShifts + '回）</small></div>' + (perShiftAvg === null ? '' : gbar(perShiftAvg * 100 / GOAL.perShift, '#b0743a')) + '</div>';
+  let totalCap = 0;
+  Object.keys(GOAL.staffHours).forEach(function(k2) { totalCap += GOAL.staffHours[k2]; });
+  const fillPct = totalCap ? Math.round(totalLessons * 1000 / totalCap) / 10 : 0;
+  html += '<div><div style="color:var(--sub);font-size:12px">枠消化率（実拘束' + totalCap.toLocaleString() + '枠）</div>'
+    + '<div style="font-size:22px;font-weight:800">' + fillPct + '%<small style="font-size:12px;color:var(--sub)"> / 目標' + GOAL.fillTarget + '%</small></div>'
+    + gbar(fillPct * 100 / GOAL.fillTarget, '#8a5aa5') + '</div>';
   html += '</div>';
 
   // 店舗別レッスン目標
@@ -2280,7 +2290,7 @@ async function renderStats(params) {
       const label = parseInt(w.slice(5, 7), 10) + '/' + parseInt(w.slice(8, 10), 10) + '〜';
       html += '<th' + (w === thisWk ? ' style="background:#d8e2dc"' : '') + '>' + label + (w === thisWk ? '<br><small>今週</small>' : '') + '</th>';
     });
-    html += '<th>月合計</th><th>済 / 予定</th></tr></thead><tbody>';
+    html += '<th>月合計</th><th>済 / 予定</th><th>埋まり率</th></tr></thead><tbody>';
     let colTot = {};
     let grandTotal = 0, grandDone = 0;
     staffs.forEach(function(sn) {
@@ -2292,12 +2302,15 @@ async function renderStats(params) {
         html += '<td' + (w === thisWk ? ' style="background:#eef3f1"' : '') + '>' + (c || '<span style="color:#bbb">0</span>') + '</td>';
       });
       grandTotal += o.total; grandDone += o.done;
+      const cap = GOAL.staffHours[sn];
+      const fr = cap ? Math.round(o.total * 100 / cap) : null;
       html += '<td style="font-weight:800">' + o.total + '</td>'
-        + '<td>' + o.done + ' / ' + (o.total - o.done) + '</td></tr>';
+        + '<td>' + o.done + ' / ' + (o.total - o.done) + '</td>'
+        + '<td>' + (fr === null ? '<span style="color:#bbb">-</span>' : '<b style="color:' + (fr >= 60 ? '#2e7d32' : (fr >= 45 ? '#805e12' : '#b3261e')) + '">' + fr + '%</b><small style="color:var(--sub)">/' + cap + '枠</small>') + '</td></tr>';
     });
     html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td>';
     weeks.forEach(function(w) { html += '<td>' + (colTot[w] || 0) + '</td>'; });
-    html += '<td>' + grandTotal + '</td><td>' + grandDone + ' / ' + (grandTotal - grandDone) + '</td></tr>';
+    html += '<td>' + grandTotal + '</td><td>' + grandDone + ' / ' + (grandTotal - grandDone) + '</td><td></td></tr>';
     html += '</tbody></table></div>';
     html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">確定予約のみ・キャンセルとスタッフ内部予約（除外名簿）は含みません。週は月曜始まり。「済」は現時点で終了したレッスン、「予定」はこれからの予約。月合計はその月の1日〜末日のレッスン数です</div>';
   }
