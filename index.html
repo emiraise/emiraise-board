@@ -2187,6 +2187,35 @@ async function renderStats(params) {
     + '会員ギャップ <b>あと' + memberGap + '名</b> → 必要体験数 <b>約' + trialsNeeded + '名</b>（成約率50%）。'
     + '今月の体験 <b>' + trialCount + '件</b>・今月の退会 <b>' + quitM + '名</b>'
     + '（月の純増見込み ≒ 体験×50% − 退会 = <b>' + (Math.round(trialCount * GOAL.trialCvr) - quitM) + '名</b>）</div>';
+  // ── 📈 1,000万ロードマップ（月次見通し・2026-08-02設計） ──
+  // 前提: ベース10名1,245枠(埋まり率55%→12月60%→4月62%) + ももか=福井(ゆうか曲線=9ヶ月で120) + アコ=富山(1月30→4月正社員)
+  const ROADMAP = [
+    { ym: '2026-08', lessons: 700, sales: 630, note: '福井高柳 8/14オープン（ももか15）' },
+    { ym: '2026-09', lessons: 727, sales: 654, note: 'ももか30' },
+    { ym: '2026-10', lessons: 755, sales: 680, note: 'アコさん採用・研修開始／ももか45' },
+    { ym: '2026-11', lessons: 782, sales: 704, note: 'ももか60' },
+    { ym: '2026-12', lessons: 817, sales: 735, note: 'ベース埋まり率60%到達／ももか70' },
+    { ym: '2027-01', lessons: 857, sales: 771, note: 'アコさん実働開始30／ももか80' },
+    { ym: '2027-02', lessons: 887, sales: 798, note: 'アコ50／ももか90' },
+    { ym: '2027-03', lessons: 917, sales: 825, note: 'アコ70／ももか100' },
+    { ym: '2027-04', lessons: 977, sales: 879, note: 'アコさん正社員(160枠)／ももか110' },
+    { ym: '2027-05', lessons: 997, sales: 897, note: 'ももか120到達🎯 ここが現体制の最大値' },
+  ];
+  html += '<h3 style="margin:12px 0 4px">📈 1,000万ロードマップ（月次見通し）</h3>';
+  html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr><th>月</th><th>見込みレッスン</th><th>見込み売上</th><th>実績</th><th style="text-align:left">マイルストーン</th></tr></thead><tbody>';
+  ROADMAP.forEach(function(rm) {
+    const isCur = rm.ym === ym;
+    html += '<tr' + (isCur ? ' style="background:#eef3f1;font-weight:700"' : '') + '>'
+      + '<td>' + parseInt(rm.ym.slice(0, 4), 10) + '/' + parseInt(rm.ym.slice(5, 7), 10) + (isCur ? ' 👈' : '') + '</td>'
+      + '<td>' + rm.lessons + '</td><td>約' + rm.sales + '万円</td>'
+      + '<td>' + (isCur ? '<b>' + totalLessons + '</b>' : '<span style="color:#bbb">-</span>') + '</td>'
+      + '<td style="text-align:left">' + esc(rm.note) + '</td></tr>';
+  });
+  html += '</tbody></table></div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:4px 2px 10px">'
+    + '2027年5月の約900万円が現メンバー＋アコさんでの最大値。残り約100万円＝埋まり率65%超 or もう1名の採用（会員330名を超えた頃が採用の適正タイミング）。'
+    + 'このペースに必要な新規: <b>全社で体験 約41名/月（成約25名）</b>。内訳目安: 駅西12・本店10・富山東8・福井8・天王寺3</div>';
+
   // 時間帯分析（過去120日の体験来店）
   const bands = [['9-11時', 9, 11], ['11-13時', 11, 13], ['13-15時', 13, 15], ['15-17時', 15, 17], ['17-19時', 17, 19], ['19-21時', 19, 21]];
   const bandCnt = bands.map(function() { return 0; });
