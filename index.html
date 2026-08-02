@@ -2114,7 +2114,9 @@ async function renderStats(params) {
     // 実拘束時間（月・大地さん申告 2026-08-02。みわさん退職・アコさん10月研修開始→4月正社員160）
     staffHours: { 'こうじ': 160, 'まゆ': 160, 'ねね': 160, 'あやな': 160, 'ゆうか': 160, 'ももか': 160,
                   'まこ': 100, '齋藤 良気': 100, 'ゆき': 120, '林　大地': 80, 'なおみ': 45 },
-    fillTarget: 60
+    fillTarget: 60,
+    // 個人別のレッスン目標（全体60%より高い期待値を置く人・2026-08-02大地さん指示）
+    staffGoal: { 'こうじ': 120 }
   };
   function isTrialR0(r) {
     return /初回|体験|キャンペーン|かんざし/.test(r.menu || '') || /新規|体験/.test(r.customer_name || '');
@@ -2339,9 +2341,11 @@ async function renderStats(params) {
       grandTotal += o.total; grandDone += o.done;
       const cap = GOAL.staffHours[sn];
       const fr = cap ? Math.round(o.total * 100 / cap) : null;
+      const pg = GOAL.staffGoal && GOAL.staffGoal[sn];
+      const okLine = pg ? Math.round(pg * 100 / cap) : 60;  // 個人目標があればそのラインで色分け
       html += '<td style="font-weight:800">' + o.total + '</td>'
         + '<td>' + o.done + ' / ' + (o.total - o.done) + '</td>'
-        + '<td>' + (fr === null ? '<span style="color:#bbb">-</span>' : '<b style="color:' + (fr >= 60 ? '#2e7d32' : (fr >= 45 ? '#805e12' : '#b3261e')) + '">' + fr + '%</b><small style="color:var(--sub)">/' + cap + '枠</small>') + '</td></tr>';
+        + '<td>' + (fr === null ? '<span style="color:#bbb">-</span>' : '<b style="color:' + (fr >= okLine ? '#2e7d32' : (fr >= okLine * 0.75 ? '#805e12' : '#b3261e')) + '">' + fr + '%</b><small style="color:var(--sub)">/' + cap + '枠' + (pg ? '・目標' + pg : '') + '</small>') + '</td></tr>';
     });
     html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td>';
     weeks.forEach(function(w) { html += '<td>' + (colTot[w] || 0) + '</td>'; });
