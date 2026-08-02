@@ -2126,15 +2126,18 @@ async function renderStats(params) {
   const estSales = (totalLessons - trialCount) * GOAL.price + trialCount * 1000;
   const salesPct = Math.round(estSales * 100 / GOAL.sales);
   // 会員数（現在有効）と今月退会
-  let curMembers = 0, quitM = 0;
+  let curMembers = 0, quitM = 0, suspM = 0;
+  const activeKeys = [];
   custs.forEach(function(cu) {
-    let act = false, q = false;
+    let act = false, q = false, sus = false;
     (cu.subscriptions || []).forEach(function(sub) {
       const end = (sub.contract_end_at || '').slice(0, 10);
       if (sub.contract_status === 'active' && !end) act = true;
+      if (sub.contract_status === 'suspended') sus = true;
       if (end && end >= first && end < nextFirst) q = true;
     });
-    if (act) curMembers++;
+    if (act) { curMembers++; activeKeys.push(custKey(cu.merchant_id, cu.customer_id)); }
+    if (sus) suspM++;
     if (q) quitM++;
   });
   // 1出勤あたり平均レッスン（シフト表がある店舗のみ）
@@ -2165,6 +2168,52 @@ async function renderStats(params) {
   html += '<div><div style="color:var(--sub);font-size:12px">枠消化率（実拘束' + totalCap.toLocaleString() + '枠）</div>'
     + '<div style="font-size:22px;font-weight:800">' + fillPct + '%<small style="font-size:12px;color:var(--sub)"> / 目標' + GOAL.fillTarget + '%</small></div>'
     + gbar(fillPct * 100 / GOAL.fillTarget, '#8a5aa5') + '</div>';
+  html += '</div>';
+
+  // ── 👥 役割別KPI（大地さん=新規獲得／良気くん=LTV・定着。新規→定着の上下流・2026-08-03設計） ──
+  const futRes = await fetchRange(today, addDays(today, 92));
+  const futSet = {};
+  ((futRes && futRes.data) || []).forEach(function(r) { if (r.customer_id) futSet[custKey(r.merchant_id, r.customer_id)] = true; });
+  const withNext = activeKeys.filter(function(k2) { return futSet[k2]; }).length;
+  const nextRate = curMembers ? Math.round(withNext * 100 / curMembers) : 0;
+  const TRIAL_TGT = { '金沢駅西店': 12, '金沢本店': 10, '富山東店': 8, '福井高柳店': 8, '天王寺店': 3 };
+  const trialByStore = {};
+  let convM = 0;
+  rows.forEach(function(r) {
+    if (!isTrialR0(r)) return;
+    const st = r.store_tag || '店舗不明';
+    trialByStore[st] = (trialByStore[st] || 0) + 1;
+    if ((subsOf0(r)) > 0) convM++;
+  });
+  function subsOf0(r) {
+    const cu = custs.find(function(c2) { return c2.merchant_id === r.merchant_id && String(c2.customer_id) === String(r.customer_id); });
+    return cu ? (cu.subscriptions || []).length : 0;
+  }
+  const trialTotalTgt = 40;
+  html += '<h3 style="margin:10px 0 4px">👥 役割別KPI（' + mo + '月）</h3>';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin:4px 0 10px">';
+  // 大地さん: 新規獲得
+  html += '<div style="border:1.5px solid #b0743a;border-radius:12px;padding:10px 12px">'
+    + '<div style="font-weight:800;margin-bottom:6px">🚀 新規獲得（大地さん）</div>'
+    + '<div style="font-size:13px;margin:3px 0">体験数 <b style="font-size:18px">' + trialCount + '</b> / 目標' + trialTotalTgt + '名</div>'
+    + gbar(trialCount * 100 / trialTotalTgt, '#b0743a');
+  Object.keys(TRIAL_TGT).forEach(function(st) {
+    const a = trialByStore[st] || 0;
+    html += '<div style="display:flex;justify-content:space-between;font-size:12px;margin-top:3px">'
+      + '<span><span class="badge" style="background:' + storeColor(st) + ';font-size:9.5px">' + esc(st) + '</span></span>'
+      + '<span>' + a + ' / ' + TRIAL_TGT[st] + '</span></div>';
+  });
+  html += '<div style="font-size:12px;margin-top:6px;color:var(--sub)">成約 ' + convM + '名（体験1名=月商+1.6万円/月）</div>'
+    + '</div>';
+  // 良気くん: LTV・定着
+  html += '<div style="border:1.5px solid #5a67a5;border-radius:12px;padding:10px 12px">'
+    + '<div style="font-weight:800;margin-bottom:6px">🤝 LTV・定着（良気くん）</div>'
+    + '<div style="font-size:13px;margin:3px 0">次回予約あり率 <b style="font-size:18px">' + nextRate + '%</b>（会員' + curMembers + '名中' + withNext + '名）/ 目標90%</div>'
+    + gbar(nextRate * 100 / 90, '#5a67a5')
+    + '<div style="font-size:13px;margin-top:6px">今月の退会 <b style="color:' + (quitM > Math.ceil(curMembers * 0.03) ? '#b3261e' : '#2e7d32') + '">' + quitM + '名</b>'
+    + '（退会率' + (curMembers + quitM ? Math.round(quitM * 1000 / (curMembers + quitM)) / 10 : 0) + '%・目標3%以下）／ 休会 ' + suspM + '名</div>'
+    + '<div style="font-size:12px;margin-top:6px;color:var(--sub)">次回予約なしの会員' + (curMembers - withNext) + '名が最優先フォロー対象（日報タブに個人名リスト）。退会1名減=月商+2.7万円の防衛</div>'
+    + '</div>';
   html += '</div>';
 
   // 店舗別レッスン目標
