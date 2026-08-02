@@ -2053,13 +2053,21 @@ async function renderStats(params) {
   const todayS = jstToday();
   const thisWk = weekStart(todayS);
 
-  const [res, custQ] = await Promise.all([
+  const [res, custQ, shiftQ, trialQ] = await Promise.all([
     fetchRange(first, nextFirst),
     fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,subscriptions'),
+    sb.from('crm_shifts').select('staff_name,date,kind').gte('date', first).lt('date', nextFirst).limit(2000),
+    sb.from('crm_reservations').select('booking_start,menu,customer_name,store_tag,merchant_id,customer_id')
+      .gte('booking_start', addDays(today, -120) + 'T00:00:00+09:00').lt('booking_start', nextFirst + 'T00:00:00+09:00')
+      .eq('status', 'accepted')
+      .or('menu.ilike.%初回%,menu.ilike.%体験%,menu.ilike.%キャンペーン%,menu.ilike.%かんざし%,customer_name.ilike.%新規%')
+      .limit(1000),
   ]);
   if (res.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(res.error.message) + '</div>'; return; }
   const rows = res.data || [];
   const custs = custQ.data || [];
+  const monthShifts = shiftQ.data || [];
+  const trials120 = trialQ.data || [];
 
   // 月内の週（月曜始まり）を列にする
   const weeks = [];
@@ -2096,6 +2104,96 @@ async function renderStats(params) {
   Object.keys(storeSet).sort().forEach(function(st) {
     html += '<a class="' + (storeSel === st ? 'on' : '') + '" href="#/stats?month=' + ym + '&store=' + encodeURIComponent(st) + '">' + esc(st) + '</a>';
   });
+  html += '</div>';
+
+  // ── 🎯 目標ダッシュボード（月商1,000万への逆算・大地さん設計 2026-07-30） ──
+  // 1,000万 ÷ 単価9,000円 = 1,111レッスン/月 ÷ 会員月3回 = 370名 ／ 稼働1,720枠×64.6% ＝ 1出勤5レッスン
+  const GOAL = {
+    sales: 10000000, price: 9000, lessons: 1111, members: 370, perShift: 5, trialCvr: 0.5,
+    byStore: { '天王寺店': 140, '金沢本店': 300, '金沢駅西店': 300, '富山東店': 250, '福井高柳店': 120 }
+  };
+  function isTrialR0(r) {
+    return /初回|体験|キャンペーン|かんざし/.test(r.menu || '') || /新規|体験/.test(r.customer_name || '');
+  }
+  const totalLessons = rows.length;
+  const trialCount = rows.filter(isTrialR0).length;
+  const estSales = (totalLessons - trialCount) * GOAL.price + trialCount * 1000;
+  const salesPct = Math.round(estSales * 100 / GOAL.sales);
+  // 会員数（現在有効）と今月退会
+  let curMembers = 0, quitM = 0;
+  custs.forEach(function(cu) {
+    let act = false, q = false;
+    (cu.subscriptions || []).forEach(function(sub) {
+      const end = (sub.contract_end_at || '').slice(0, 10);
+      if (sub.contract_status === 'active' && !end) act = true;
+      if (end && end >= first && end < nextFirst) q = true;
+    });
+    if (act) curMembers++;
+    if (q) quitM++;
+  });
+  // 1出勤あたり平均レッスン（シフト表がある店舗のみ）
+  const workShifts = monthShifts.filter(function(x) { return x.kind === 'work'; }).length;
+  const perShiftAvg = workShifts ? Math.round(totalLessons * 10 / workShifts) / 10 : null;
+  // 必要体験数（会員ギャップ→成約率50%換算）
+  const memberGap = Math.max(0, GOAL.members - curMembers);
+  const trialsNeeded = Math.ceil(memberGap / GOAL.trialCvr);
+  const trialVisited120 = trials120.filter(function(r) { return r.booking_start < nowIso; }).length;
+
+  function gbar(pct, color) {
+    const w = Math.min(100, Math.max(0, pct));
+    return '<div style="background:#dfe6e2;border-radius:99px;height:10px;overflow:hidden"><div style="width:' + w + '%;height:10px;background:' + (color || 'var(--accent)') + '"></div></div>';
+  }
+  html += '<div class="card" style="border:2px solid var(--accent)"><h2>🎯 月商1,000万への進捗（' + mo + '月・経営陣のみ）</h2>';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:8px 0">';
+  html += '<div><div style="color:var(--sub);font-size:12px">見込み売上（レッスン換算・概算）</div>'
+    + '<div style="font-size:22px;font-weight:800">¥' + estSales.toLocaleString() + '<small style="font-size:12px;color:var(--sub)"> / 1,000万（' + salesPct + '%）</small></div>' + gbar(salesPct) + '</div>';
+  html += '<div><div style="color:var(--sub);font-size:12px">レッスン数（予約込み）</div>'
+    + '<div style="font-size:22px;font-weight:800">' + totalLessons + '<small style="font-size:12px;color:var(--sub)"> / ' + GOAL.lessons + '（' + Math.round(totalLessons * 100 / GOAL.lessons) + '%）</small></div>' + gbar(totalLessons * 100 / GOAL.lessons) + '</div>';
+  html += '<div><div style="color:var(--sub);font-size:12px">会員数（現在）</div>'
+    + '<div style="font-size:22px;font-weight:800">' + curMembers + '名<small style="font-size:12px;color:var(--sub)"> / ' + GOAL.members + '名（あと' + memberGap + '名）</small></div>' + gbar(curMembers * 100 / GOAL.members, '#5a67a5') + '</div>';
+  html += '<div><div style="color:var(--sub);font-size:12px">1出勤あたり平均レッスン</div>'
+    + '<div style="font-size:22px;font-weight:800">' + (perShiftAvg === null ? '-' : perShiftAvg) + '<small style="font-size:12px;color:var(--sub)"> / 目標' + GOAL.perShift + '（出勤' + workShifts + '回）</small></div>' + (perShiftAvg === null ? '' : gbar(perShiftAvg * 100 / GOAL.perShift, '#b0743a')) + '</div>';
+  html += '</div>';
+
+  // 店舗別レッスン目標
+  html += '<h3 style="margin:8px 0 4px">店舗別レッスン目標（' + mo + '月・予約込み）</h3>';
+  html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr><th>店舗</th><th>目標</th><th>実績+予約</th><th>達成率</th><th style="min-width:180px">進捗</th></tr></thead><tbody>';
+  let gT = 0, gA = 0;
+  Object.keys(GOAL.byStore).forEach(function(st) {
+    const t = GOAL.byStore[st];
+    const a = rows.filter(function(r) { return (r.store_tag || '') === st; }).length;
+    gT += t; gA += a;
+    const pct = Math.round(a * 100 / t);
+    html += '<tr><td><span class="badge" style="background:' + storeColor(st) + '">' + esc(st) + '</span></td>'
+      + '<td>' + t + '</td><td style="font-weight:700">' + a + '</td><td>' + pct + '%</td>'
+      + '<td>' + gbar(pct, pct >= 100 ? '#2e7d32' : (pct >= 70 ? '#b0743a' : '#b3261e')) + '</td></tr>';
+  });
+  html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td><td>' + gT + '</td><td>' + gA + '</td><td>' + Math.round(gA * 100 / gT) + '%</td><td>' + gbar(gA * 100 / gT) + '</td></tr>';
+  html += '</tbody></table></div>';
+
+  // 体験KPI（必要数の逆算）と時間帯分析
+  html += '<h3 style="margin:10px 0 4px">体験KPI（会員370名への逆算・成約率50%想定）</h3>';
+  html += '<div style="font-size:13.5px;line-height:1.9;margin:4px 2px">'
+    + '会員ギャップ <b>あと' + memberGap + '名</b> → 必要体験数 <b>約' + trialsNeeded + '名</b>（成約率50%）。'
+    + '今月の体験 <b>' + trialCount + '件</b>・今月の退会 <b>' + quitM + '名</b>'
+    + '（月の純増見込み ≒ 体験×50% − 退会 = <b>' + (Math.round(trialCount * GOAL.trialCvr) - quitM) + '名</b>）</div>';
+  // 時間帯分析（過去120日の体験来店）
+  const bands = [['9-11時', 9, 11], ['11-13時', 11, 13], ['13-15時', 13, 15], ['15-17時', 15, 17], ['17-19時', 17, 19], ['19-21時', 19, 21]];
+  const bandCnt = bands.map(function() { return 0; });
+  trials120.forEach(function(r) {
+    if (r.booking_start >= nowIso) return;
+    const h = parseInt(new Date(r.booking_start).toLocaleTimeString('ja-JP', { hour: '2-digit', hour12: false, timeZone: TZ }), 10);
+    bands.forEach(function(b, i2) { if (h >= b[1] && h < b[2]) bandCnt[i2]++; });
+  });
+  const maxB = Math.max.apply(null, bandCnt.concat([1]));
+  html += '<h3 style="margin:10px 0 4px">体験が入る時間帯（過去120日・来店済' + trialVisited120 + '件）</h3><div style="margin:4px 2px">';
+  bands.forEach(function(b, i2) {
+    html += '<div style="display:flex;align-items:center;gap:8px;margin:3px 0"><span style="min-width:64px;font-size:12px;color:var(--sub)">' + b[0] + '</span>'
+      + '<div style="flex:1;background:#dfe6e2;border-radius:99px;height:14px;overflow:hidden"><div style="width:' + Math.round(bandCnt[i2] * 100 / maxB) + '%;height:14px;background:var(--accent)"></div></div>'
+      + '<b style="min-width:32px;text-align:right">' + bandCnt[i2] + '</b></div>';
+  });
+  html += '</div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">売上は「(レッスン数−体験数)×9,000円＋体験×1,000円」の概算換算（月謝の実請求額ではありません）。出勤回数はシフト表のある店舗のみ集計（天王寺は未対応）。目標値の変更はいつでも言ってください</div>';
   html += '</div>';
 
   // ── 店舗サマリー（レッスン・会員・体験→成約・退会） ──
