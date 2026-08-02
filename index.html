@@ -158,6 +158,9 @@
   .rep th, .rep td { border:1px solid var(--line); padding:8px 6px; text-align:right; white-space:nowrap; }
   .rep th:first-child, .rep td:first-child { text-align:left; position:sticky; left:0; background:#fff; }
   .rep thead th { background:#eef3f1; text-align:center; }
+  .compass { font-weight:800; font-size:12.5px; letter-spacing:.06em; color:#7a5c1e; background:linear-gradient(135deg, #f3e7c8, #e8d5a3); padding:6px 13px; border-radius:999px; text-decoration:none; box-shadow:2px 2px 5px var(--sd, rgba(0,0,0,.12)), -2px -2px 5px var(--sl, rgba(255,255,255,.7)); margin-left:10px; white-space:nowrap; }
+  .compass:hover { filter:brightness(1.04); }
+  .compass.on { box-shadow:inset 2px 2px 5px rgba(122,92,30,.3); }
   .moncal { position:absolute; z-index:60; background:var(--bg, #fff); border:1px solid var(--line); border-radius:14px; padding:10px; box-shadow:0 8px 24px rgba(0,0,0,.18); }
   .moncal .mc-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px; }
   .moncal .mc-head button { border:none; background:none; font-size:16px; cursor:pointer; padding:2px 10px; }
@@ -216,10 +219,10 @@
 <body>
 <header id="topbar" hidden>
   <a class="brand" href="#/"><img src="logo.png" alt="Emiraise 顧客ボード" class="brandimg"></a>
+  <a href="#/stats" id="navStats" hidden class="compass">🧭 COMPASS</a>
   <a href="#/">予約</a>
   <a href="#/tl">タイムライン</a>
   <a href="#/trial">体験</a>
-  <a href="#/stats" id="navStats" hidden>実績</a>
   <a href="#/subs">月謝</a>
   <a href="#/report">日報</a>
   <a href="#/search">検索</a>
@@ -2058,7 +2061,7 @@ async function renderStats(params) {
     fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,subscriptions'),
     sb.from('crm_shifts').select('staff_name,date,kind').gte('date', first).lt('date', nextFirst).limit(2000),
     sb.from('crm_reservations').select('booking_start,menu,customer_name,store_tag,merchant_id,customer_id')
-      .gte('booking_start', addDays(today, -120) + 'T00:00:00+09:00').lt('booking_start', nextFirst + 'T00:00:00+09:00')
+      .gte('booking_start', addDays(todayS, -120) + 'T00:00:00+09:00').lt('booking_start', nextFirst + 'T00:00:00+09:00')
       .eq('status', 'accepted')
       .or('menu.ilike.%初回%,menu.ilike.%体験%,menu.ilike.%キャンペーン%,menu.ilike.%かんざし%,customer_name.ilike.%新規%')
       .limit(1000),
@@ -2093,7 +2096,7 @@ async function renderStats(params) {
   });
   const staffs = Object.keys(perStaff).sort(function(a, b) { return perStaff[b].total - perStaff[a].total || a.localeCompare(b, 'ja'); });
 
-  let html = '<h2>📊 スタッフ別レッスン実績（' + y + '年' + mo + '月' + (storeSel ? '・' + esc(storeSel) : '') + '）</h2>';
+  let html = '<h2>🧭 Emiraise COMPASS — 経営ダッシュボード（' + y + '年' + mo + '月' + (storeSel ? '・' + esc(storeSel) : '') + '）</h2>';
   html += '<div class="daynav">'
     + '<button id="stPrev">← ' + parseInt(prevYm.slice(5, 7), 10) + '月</button>'
     + '<b style="font-size:15px">' + y + '年' + mo + '月</b>'
@@ -2171,7 +2174,7 @@ async function renderStats(params) {
   html += '</div>';
 
   // ── 👥 役割別KPI（大地さん=新規獲得／良気くん=LTV・定着。新規→定着の上下流・2026-08-03設計） ──
-  const futRes = await fetchRange(today, addDays(today, 92));
+  const futRes = await fetchRange(todayS, addDays(todayS, 92));
   const futSet = {};
   ((futRes && futRes.data) || []).forEach(function(r) { if (r.customer_id) futSet[custKey(r.merchant_id, r.customer_id)] = true; });
   const withNext = activeKeys.filter(function(k2) { return futSet[k2]; }).length;
