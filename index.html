@@ -2151,13 +2151,13 @@ async function renderStats(params) {
     sales: 10000000, price: 9000, lessons: 1111, members: 370, perShift: 5, trialCvr: 0.6,
     byStore: { '金沢本店': 300, '金沢駅西店': 300, '富山東店': 250, '福井高柳店': 120, '天王寺店': 140 },  // 表示順=店舗の正式順（2026-08-03大地指示）
     // 実拘束時間（月・大地さん申告 2026-08-02。みわさん退職・アコさん10月研修開始→4月正社員160）
-    staffHours: { 'こうじ': 160, 'まゆ': 160, 'ねね': 100, 'あやな': 160, 'ゆうか': 160, 'ももか': 160,
+    staffHours: { 'こうじ': 160, 'まゆ': 160, 'ねね': 160, 'あやな': 160, 'ゆうか': 160, 'ももか': 160,
                   'まこ': 100, '齋藤 良気': 100, 'ゆき': 120, '林　大地': 80, 'なおみ': 45 },
     fillTarget: 60,
     // 個人別のレッスン目標（全体60%より高い期待値を置く人・2026-08-02大地さん指示）
     staffGoal: { 'こうじ': 120, 'まゆ': 110 },
     // 金沢2店を兼務するスタッフの店舗別枠（2026-08-03大地指示: あやな=各80・まこ=各50。合計は従来と同じ160/100）
-    staffHoursByStore: { 'あやな': { '金沢本店': 80, '金沢駅西店': 80 }, 'まこ': { '金沢本店': 50, '金沢駅西店': 50 }, 'ねね': { '金沢駅西店': 100 } },
+    staffHoursByStore: { 'あやな': { '金沢本店': 80, '金沢駅西店': 80 }, 'まこ': { '金沢本店': 50, '金沢駅西店': 50 }, 'ねね': { '金沢駅西店': 100, '福井高柳店': 60 } },
     // 店舗損益モデル（2026-08-03・6月P&Lベースの概算。家賃実績は富山東のみ・他は推定→実額が分かり次第差し替え）
     staffPay: { 'こうじ': 36, 'まゆ': 34, 'ねね': 30, 'あやな': 28, 'まこ': 24, 'ゆうか': 39, 'ゆき': 37,
                 'ももか': 27, '林　大地': 46, '齋藤 良気': 40, 'なおみ': 10 },  // 月額・社保込み概算(万円)
@@ -2290,20 +2290,20 @@ async function renderStats(params) {
   // ── 📈 1,000万ロードマップ（月次見通し・2026-08-02設計） ──
   // 前提: ベース10名1,245枠(埋まり率55%→12月60%→4月62%) + ももか=福井(ゆうか曲線=9ヶ月で120) + アコ=富山(1月30→4月正社員)
   // 人件費pc: 6月実績318万(役員65+給与218.5+法定福利33+厚生1)ベース。みわ退職-20・大地報酬25→40(+15)
-  // ・和田さん30万込み(8月支払開始・動画編集委託6万の置換で実質+24)・ももか/アコ/澄田=22万+法定福利+交通費≒27万込み
-  // （ももか8/14入社=8月は半月14万・アコ10月〜・澄田12月〜）
+  // ・和田さん30万込み(8月支払開始・動画編集委託6万の置換で実質+24)・ももか/アコ/住田=22万+法定福利+交通費≒27万込み
+  // （ももか8/14入社=8月は半月14万・アコ10月〜・住田12月〜）
   const ROADMAP = [
     { ym: '2026-08', lessons: 700, sales: 630, other: 35, pc: 351, note: '福井高柳 8/14オープン／和田 給与開始' },
     { ym: '2026-09', lessons: 727, sales: 654, other: 40, pc: 364, note: 'ももか30' },
     { ym: '2026-10', lessons: 755, sales: 680, other: 30, pc: 391, note: 'アコ採用・研修開始／ももか45' },
     { ym: '2026-11', lessons: 782, sales: 704, other: 30, pc: 391, note: 'ももか60' },
-    { ym: '2026-12', lessons: 817, sales: 735, other: 30, pc: 418, note: '澄田採用（天王寺）／埋まり率60%到達' },
+    { ym: '2026-12', lessons: 817, sales: 735, other: 30, pc: 418, note: '住田採用（天王寺）／埋まり率60%到達' },
     { ym: '2027-01', lessons: 857, sales: 771, other: 30, pc: 418, note: 'アコ実働30／ももか85' },
-    { ym: '2027-02', lessons: 917, sales: 825, other: 30, pc: 418, note: 'ももか100=福井単店黒字ライン／澄田実働30' },
-    { ym: '2027-03', lessons: 957, sales: 861, other: 30, pc: 418, note: 'アコ70／澄田40' },
-    { ym: '2027-04', lessons: 1037, sales: 933, other: 30, pc: 418, note: 'アコ正社員(160枠)／澄田60' },
-    { ym: '2027-05', lessons: 1072, sales: 965, other: 30, pc: 418, note: 'ももか120到達🎯／澄田75' },
-    { ym: '2027-06', lessons: 1102, sales: 992, other: 30, pc: 418, note: 'アコ120／澄田90' },
+    { ym: '2027-02', lessons: 917, sales: 825, other: 30, pc: 418, note: 'ももか100=福井単店黒字ライン／住田実働30' },
+    { ym: '2027-03', lessons: 957, sales: 861, other: 30, pc: 418, note: 'アコ70／住田40' },
+    { ym: '2027-04', lessons: 1037, sales: 933, other: 30, pc: 418, note: 'アコ正社員(160枠)／住田60' },
+    { ym: '2027-05', lessons: 1072, sales: 965, other: 30, pc: 418, note: 'ももか120到達🎯／住田75' },
+    { ym: '2027-06', lessons: 1102, sales: 992, other: 30, pc: 418, note: 'アコ120／住田90' },
     { ym: '2027-07', lessons: 1122, sales: 1010, other: 30, pc: 418, note: '🏆 月商1,000万到達ライン' },
     { ym: '2027-08', lessons: 1140, sales: 1026, other: 30, pc: 418, note: '🎯 目標月（余裕を持って達成）' },
   ];
@@ -2332,7 +2332,7 @@ async function renderStats(params) {
   html += '<div style="color:var(--sub);font-size:11px;margin:4px 2px 10px">'
     + 'セミナー等は計画値30万/月(実績: 7月100万・変動30〜50万)。コンサル事業は別途検討。'
     + '福井の損益分岐: 固定費約70万円（ももか27＋家賃15＋広告15＋諸経費13）＝月78レッスン。富山東の実績カーブ（2025年10月開業→7ヶ月目黒字・1月▲21万→4月+18万→6月+51万）と同じ軌道なら<b>2027年2〜3月に単店黒字</b>（ももか月商100万/半年前提なら2月）。'
-    + '2027年7月の1,000万到達には、体験40名/月の継続とアコ・澄田の戦力化カーブが前提。ズレたら「ロードマップ引き直して」で更新</div>';
+    + '2027年7月の1,000万到達には、体験40名/月の継続とアコ・住田の戦力化カーブが前提。ズレたら「ロードマップ引き直して」で更新</div>';
 
   // ── 📋 店長タスク（店舗別チェックリスト・MTGの宿題管理） ──
   const { data: mgrTasks } = await sb.from('crm_manager_tasks').select('*').order('created_at').limit(300);
@@ -2511,13 +2511,14 @@ async function renderStats(params) {
         html += '<td' + (w === thisWk ? ' style="background:#eef3f1"' : '') + '>' + (c || '<span style="color:#bbb">0</span>') + '</td>';
       });
       grandTotal += o.total; grandDone += o.done;
-      const cap = GOAL.staffHours[sn];
+      const hbs = GOAL.staffHoursByStore && GOAL.staffHoursByStore[sn];
+      // 店舗ページでは「その店舗の枠」を分母にする（あやな本店なら/80・全店なら/160）
+      const cap = (storeSel && hbs) ? (hbs[storeSel] || null) : GOAL.staffHours[sn];
       const fr = cap ? Math.round(o.total * 100 / cap) : null;
       const pg = GOAL.staffGoal && GOAL.staffGoal[sn];
-      const okLine = pg ? Math.round(pg * 100 / cap) : 60;  // 個人目標があればそのラインで色分け
+      const okLine = (pg && cap && !storeSel) ? Math.round(pg * 100 / cap) : 60;  // 個人目標は全店表示のときだけ適用
       let byStoreTxt = '';
-      const hbs = GOAL.staffHoursByStore && GOAL.staffHoursByStore[sn];
-      if (hbs) {
+      if (hbs && !storeSel) {
         byStoreTxt = '<br><small style="color:var(--sub)">' + Object.keys(hbs).map(function(st2) {
           const c2 = (staffStoreCnt[sn] && staffStoreCnt[sn][st2]) || 0;
           return st2.replace('金沢', '').replace('店', '') + c2 + '/' + hbs[st2];
@@ -2525,7 +2526,7 @@ async function renderStats(params) {
       }
       html += '<td style="font-weight:800">' + o.total + '</td>'
         + '<td>' + o.done + ' / ' + (o.total - o.done) + '</td>'
-        + '<td>' + (fr === null ? '<span style="color:#bbb">-</span>' : '<b style="color:' + (fr >= okLine ? '#2e7d32' : (fr >= okLine * 0.75 ? '#805e12' : '#b3261e')) + '">' + fr + '%</b><small style="color:var(--sub)">/' + cap + '枠' + (pg ? '・目標' + pg : '') + '</small>' + byStoreTxt) + '</td></tr>';
+        + '<td>' + (fr === null ? '<span style="color:#bbb">-</span>' : '<b style="color:' + (fr >= okLine ? '#2e7d32' : (fr >= okLine * 0.75 ? '#805e12' : '#b3261e')) + '">' + fr + '%</b><small style="color:var(--sub)">/' + cap + '枠' + (pg && !storeSel ? '・目標' + pg : '') + '</small>' + byStoreTxt) + '</td></tr>';
     });
     html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td>';
     weeks.forEach(function(w) { html += '<td>' + (colTot[w] || 0) + '</td>'; });
