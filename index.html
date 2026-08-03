@@ -2109,6 +2109,32 @@ async function renderStats(params) {
   });
   html += '</div>';
 
+  // ── 📅 店舗ページ: 月末見通し（店舗フィルタ選択時のみ・2026-08-03大地さん要望） ──
+  if (storeSel) {
+    const stRows = rows.filter(function(r) { return (r.store_tag || '') === storeSel; });
+    const booked = stRows.length;
+    const doneCnt = stRows.filter(function(r) { return r.booking_start < nowIso; }).length;
+    const isCurMonth = ym === todayS.slice(0, 7);
+    const elapsed = isCurMonth ? Math.max(1, parseInt(todayS.slice(8, 10), 10)) : dim;
+    const pace = Math.round(doneCnt / elapsed * dim);
+    const proj = Math.max(booked, pace);
+    const unit = 0.874;
+    const salesBooked = Math.round(booked * unit);
+    const salesProj = Math.round(proj * unit);
+    const tgt = { '天王寺店': 140, '金沢本店': 300, '金沢駅西店': 300, '富山東店': 250, '福井高柳店': 120 }[storeSel] || 0;
+    html += '<div class="card" style="border:1.5px solid ' + storeColor(storeSel) + '">'
+      + '<h2>📅 ' + esc(storeSel) + ' の' + mo + '月見通し</h2>'
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:6px 0">'
+      + '<div><div style="color:var(--sub);font-size:12px">確定＋予約</div><div style="font-size:22px;font-weight:800">' + booked + '<small style="font-size:12px;color:var(--sub)">レッスン（済' + doneCnt + '）</small></div></div>'
+      + '<div><div style="color:var(--sub);font-size:12px">月末予測（現ペース）</div><div style="font-size:22px;font-weight:800">約' + proj + '<small style="font-size:12px;color:var(--sub)">レッスン</small></div></div>'
+      + '<div><div style="color:var(--sub);font-size:12px">見込み売上（実効単価8,740円）</div><div style="font-size:22px;font-weight:800">' + salesBooked + '〜' + salesProj + '<small style="font-size:12px;color:var(--sub)">万円</small></div></div>'
+      + (tgt ? '<div><div style="color:var(--sub);font-size:12px">目標' + tgt + 'レッスンへの達成見込み</div><div style="font-size:22px;font-weight:800">' + Math.round(proj * 100 / tgt) + '%</div>'
+        + '<div style="background:#dfe6e2;border-radius:99px;height:10px;overflow:hidden;margin-top:4px"><div style="width:' + Math.min(100, Math.round(proj * 100 / tgt)) + '%;height:10px;background:' + (proj >= tgt ? '#2e7d32' : (proj >= tgt * 0.7 ? '#b0743a' : '#b3261e')) + '"></div></div></div>' : '')
+      + '</div>'
+      + '<div style="color:var(--sub);font-size:11px">月末予測＝消化済み' + doneCnt + '件÷経過' + elapsed + '日×' + dim + '日と予約済みの大きい方。月の後半に予約が積み上がる分は予測が徐々に上がります</div>'
+      + '</div>';
+  }
+
   // ── 🎯 目標ダッシュボード（月商1,000万への逆算・大地さん設計 2026-07-30） ──
   // 1,000万 ÷ 単価9,000円 = 1,111レッスン/月 ÷ 会員月3回 = 370名 ／ 稼働1,720枠×64.6% ＝ 1出勤5レッスン
   const GOAL = {
@@ -2243,11 +2269,11 @@ async function renderStats(params) {
   html += '</tbody></table></div>';
 
   // 体験KPI（必要数の逆算）と時間帯分析
-  html += '<h3 style="margin:10px 0 4px">体験KPI（会員370名への逆算・成約率50%想定）</h3>';
+  html += '<h3 style="margin:10px 0 4px">体験KPI（会員370名への逆算・成約率60%=実績値）</h3>';
   html += '<div style="font-size:13.5px;line-height:1.9;margin:4px 2px">'
-    + '会員ギャップ <b>あと' + memberGap + '名</b> → 必要体験数 <b>約' + trialsNeeded + '名</b>（成約率50%）。'
+    + '会員ギャップ <b>あと' + memberGap + '名</b> → 必要体験数 <b>約' + trialsNeeded + '名</b>（成約率60%）。'
     + '今月の体験 <b>' + trialCount + '件</b>・今月の退会 <b>' + quitM + '名</b>'
-    + '（月の純増見込み ≒ 体験×50% − 退会 = <b>' + (Math.round(trialCount * GOAL.trialCvr) - quitM) + '名</b>）</div>';
+    + '（月の純増見込み ≒ 体験×60% − 退会 = <b>' + (Math.round(trialCount * GOAL.trialCvr) - quitM) + '名</b>）</div>';
   // ── 📈 1,000万ロードマップ（月次見通し・2026-08-02設計） ──
   // 前提: ベース10名1,245枠(埋まり率55%→12月60%→4月62%) + ももか=福井(ゆうか曲線=9ヶ月で120) + アコ=富山(1月30→4月正社員)
   // 人件費pc: 6月実績318万(役員65+給与218.5+法定福利33+厚生1)ベース。みわ退職-20・大地報酬25→40(+15)
