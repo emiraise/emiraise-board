@@ -2230,7 +2230,7 @@ async function renderStats(params) {
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin:4px 0 10px">';
   // 大地さん: 新規獲得
   html += '<div style="border:1.5px solid #b0743a;border-radius:12px;padding:10px 12px">'
-    + '<div style="font-weight:800;margin-bottom:6px">🚀 新規獲得（大地さん）</div>'
+    + '<div style="font-weight:800;margin-bottom:6px">🚀 マーケティング（責任者：大地さん）</div>'
     + '<div style="font-size:13px;margin:3px 0">体験数 <b style="font-size:18px">' + trialCount + '</b> / 目標' + trialTotalTgt + '名</div>'
     + gbar(trialCount * 100 / trialTotalTgt, '#b0743a');
   Object.keys(TRIAL_TGT).forEach(function(st) {
@@ -2243,7 +2243,7 @@ async function renderStats(params) {
     + '</div>';
   // 良気くん: LTV・定着
   html += '<div style="border:1.5px solid #5a67a5;border-radius:12px;padding:10px 12px">'
-    + '<div style="font-weight:800;margin-bottom:6px">🤝 LTV・定着（良気くん）</div>'
+    + '<div style="font-weight:800;margin-bottom:6px">🤝 LTV・定着（GM：良気くん）</div>'
     + '<div style="font-size:13px;margin:3px 0">次回予約あり率 <b style="font-size:18px">' + nextRate + '%</b>（会員' + curMembers + '名中' + withNext + '名）/ 目標90%</div>'
     + gbar(nextRate * 100 / 90, '#5a67a5')
     + '<div style="font-size:13px;margin-top:6px">今月の退会 <b style="color:' + (quitM > Math.ceil(curMembers * 0.03) ? '#b3261e' : '#2e7d32') + '">' + quitM + '名</b>'
