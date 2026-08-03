@@ -1014,8 +1014,13 @@ async function exclNames() {
   (data || []).forEach(function(x) { _exclCache[x.name_norm] = true; });
   return _exclCache;
 }
+// 内部枠キーワード（スタッフがブロック用に入れる疑似予約）はお客様レッスンに数えない
+const INTERNAL_NAME_RE = /ミーティング|MTG|mtg|研修|MEO|meo|HPB|hpb|ホットペッパー|セミナー|講習|面談|撮影|練習|清掃|掃除|休憩|ブロック|自主トレ/;
 function filterExcl(rows, ex) {
-  return (rows || []).filter(function(r) { return !ex[nw(r.customer_name || '')]; });
+  return (rows || []).filter(function(r) {
+    const nm = r.customer_name || '';
+    return !ex[nw(nm)] && !INTERNAL_NAME_RE.test(nm);
+  });
 }
 // 顧客系テーブルの全件取得（1000件上限のページ分割・顧客が1000名を超えても欠けない）
 async function fetchTable(table, sel) {
