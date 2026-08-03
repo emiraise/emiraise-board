@@ -2108,8 +2108,9 @@ async function renderStats(params) {
     + '<button id="stNext">' + parseInt(nextYm.slice(5, 7), 10) + '月 →</button>'
     + (ym !== jstToday().slice(0, 7) ? '<button id="stNow">今月</button>' : '')
     + '</div>';
+  const STORE_ORDER5 = ['金沢本店', '金沢駅西店', '富山東店', '福井高柳店', '天王寺店'];
   html += '<div class="chips"><a class="' + (storeSel ? '' : 'on') + '" href="#/stats?month=' + ym + '">全店</a>';
-  Object.keys(storeSet).sort().forEach(function(st) {
+  STORE_ORDER5.concat(Object.keys(storeSet).filter(function(st) { return STORE_ORDER5.indexOf(st) < 0; }).sort()).forEach(function(st) {
     html += '<a class="' + (storeSel === st ? 'on' : '') + '" href="#/stats?month=' + ym + '&store=' + encodeURIComponent(st) + '">' + esc(st) + '</a>';
   });
   html += '</div>';
@@ -2144,7 +2145,7 @@ async function renderStats(params) {
   // 1,000万 ÷ 単価9,000円 = 1,111レッスン/月 ÷ 会員月3回 = 370名 ／ 稼働1,720枠×64.6% ＝ 1出勤5レッスン
   const GOAL = {
     sales: 10000000, price: 9000, lessons: 1111, members: 370, perShift: 5, trialCvr: 0.6,
-    byStore: { '天王寺店': 140, '金沢本店': 300, '金沢駅西店': 300, '富山東店': 250, '福井高柳店': 120 },
+    byStore: { '金沢本店': 300, '金沢駅西店': 300, '富山東店': 250, '福井高柳店': 120, '天王寺店': 140 },  // 表示順=店舗の正式順（2026-08-03大地指示）
     // 実拘束時間（月・大地さん申告 2026-08-02。みわさん退職・アコさん10月研修開始→4月正社員160）
     staffHours: { 'こうじ': 160, 'まゆ': 160, 'ねね': 160, 'あやな': 160, 'ゆうか': 160, 'ももか': 160,
                   'まこ': 100, '齋藤 良気': 100, 'ゆき': 120, '林　大地': 80, 'なおみ': 45 },
@@ -2217,7 +2218,7 @@ async function renderStats(params) {
   ((futRes && futRes.data) || []).forEach(function(r) { if (r.customer_id) futSet[custKey(r.merchant_id, r.customer_id)] = true; });
   const withNext = activeKeys.filter(function(k2) { return futSet[k2]; }).length;
   const nextRate = curMembers ? Math.round(withNext * 100 / curMembers) : 0;
-  const TRIAL_TGT = { '金沢駅西店': 10, '金沢本店': 8, '富山東店': 8, '福井高柳店': 11, '天王寺店': 3 };  // 2026-08-03再配分: 福井厚め・金沢2店で18
+  const TRIAL_TGT = { '金沢本店': 8, '金沢駅西店': 10, '富山東店': 8, '福井高柳店': 11, '天王寺店': 3 };  // 2026-08-03再配分: 福井厚め・金沢2店で18
   const trialByStore = {};
   let convM = 0;
   rows.forEach(function(r) {
@@ -2405,8 +2406,9 @@ async function renderStats(params) {
       if (quitInMonth) o.quit++;
     }
   });
-  const smKeys = Object.keys(sm).filter(function(k) { return !storeSel || k === storeSel; })
-    .sort(function(a, b) { return sm[b].lessons - sm[a].lessons; });
+  STORE_ORDER5.forEach(function(k) { smOf(k); });  // 福井など0件の店舗も必ず表示（8/14開業前から枠を確保）
+  const smKeys = STORE_ORDER5.concat(Object.keys(sm).filter(function(k) { return STORE_ORDER5.indexOf(k) < 0; }).sort())
+    .filter(function(k) { return sm[k] && (!storeSel || k === storeSel); });
   if (smKeys.length) {
     html += '<h3 style="margin:10px 2px 4px">🏬 店舗サマリー</h3>';
     html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
