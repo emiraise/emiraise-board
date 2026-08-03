@@ -2502,7 +2502,7 @@ async function renderStats(params) {
     });
     html += '<th>月合計</th><th>済 / 予定</th><th>埋まり率</th></tr></thead><tbody>';
     let colTot = {};
-    let grandTotal = 0, grandDone = 0;
+    let grandTotal = 0, grandDone = 0, capTot = 0;
     staffs.forEach(function(sn) {
       const o = perStaff[sn];
       html += '<tr><td>' + esc(sn) + '</td>';
@@ -2515,6 +2515,7 @@ async function renderStats(params) {
       const hbs = GOAL.staffHoursByStore && GOAL.staffHoursByStore[sn];
       // 店舗ページでは「その店舗の枠」を分母にする（あやな本店なら/80・全店なら/160）
       const cap = (storeSel && hbs) ? (hbs[storeSel] || null) : GOAL.staffHours[sn];
+      if (cap) capTot += cap;
       const fr = cap ? Math.round(o.total * 100 / cap) : null;
       const pg = GOAL.staffGoal && GOAL.staffGoal[sn];
       const okLine = (pg && cap && !storeSel) ? Math.round(pg * 100 / cap) : 60;  // 個人目標は全店表示のときだけ適用
@@ -2531,9 +2532,11 @@ async function renderStats(params) {
     });
     html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td>';
     weeks.forEach(function(w) { html += '<td>' + (colTot[w] || 0) + '</td>'; });
-    html += '<td>' + grandTotal + '</td><td>' + grandDone + ' / ' + (grandTotal - grandDone) + '</td><td></td></tr>';
+    const totFr = capTot ? Math.round(grandTotal * 100 / capTot) : null;
+    html += '<td>' + grandTotal + '</td><td>' + grandDone + ' / ' + (grandTotal - grandDone) + '</td>'
+      + '<td>' + (totFr === null ? '' : '<b style="color:' + (totFr >= 60 ? '#2e7d32' : (totFr >= 45 ? '#805e12' : '#b3261e')) + '">' + totFr + '%</b><small style="color:var(--sub)">/最大' + capTot + '枠</small>') + '</td></tr>';
     html += '</tbody></table></div>';
-    html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">確定予約のみ・キャンセルとスタッフ内部予約（除外名簿）は含みません。週は月曜始まり。「済」は現時点で終了したレッスン、「予定」はこれからの予約。月合計はその月の1日〜末日のレッスン数です</div>';
+    html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">確定予約のみ・キャンセルとスタッフ内部予約（除外名簿）は含みません。週は月曜始まり。「済」は現時点で終了したレッスン、「予定」はこれからの予約。月合計はその月の1日〜末日のレッスン数。合計行の「最大◯枠」＝この表にいるスタッフの出勤枠の合計（店舗ページでは店舗別枠で計算）＝その月の最大キャパです</div>';
   }
   app.innerHTML = html;
   app.querySelectorAll('.plopen').forEach(function(a) {
