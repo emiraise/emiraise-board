@@ -2190,7 +2190,7 @@ async function renderStats(params) {
   }
   html += '<div class="card" style="border:2px solid var(--accent)"><h2>🎯 月商1,000万への進捗（' + mo + '月・経営陣のみ）</h2>';
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:8px 0">';
-  html += '<div><div style="color:var(--sub);font-size:12px">見込み売上（レッスン換算・概算）</div>'
+  html += '<div><div style="color:var(--sub);font-size:12px">店舗レッスン売上の見込み（概算・セミナー/動画編集は含まず）</div>'
     + '<div style="font-size:22px;font-weight:800">¥' + estSales.toLocaleString() + '<small style="font-size:12px;color:var(--sub)"> / 1,000万（' + salesPct + '%）</small></div>' + gbar(salesPct) + '</div>';
   html += '<div><div style="color:var(--sub);font-size:12px">レッスン数（予約込み）</div>'
     + '<div style="font-size:22px;font-weight:800">' + totalLessons + '<small style="font-size:12px;color:var(--sub)"> / ' + GOAL.lessons + '（' + Math.round(totalLessons * 100 / GOAL.lessons) + '%）</small></div>' + gbar(totalLessons * 100 / GOAL.lessons) + '</div>';
@@ -2267,6 +2267,7 @@ async function renderStats(params) {
   });
   html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td><td>' + gT + '</td><td>' + gA + '</td><td>' + Math.round(gA * 100 / gT) + '%</td><td>' + gbar(gA * 100 / gT) + '</td></tr>';
   html += '</tbody></table></div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:2px 2px 8px">※スタッフ内部予約（研修枠など・除外名簿）を除いた「お客様レッスンのみ」の数字です。STORES管理画面の件数とは除外分だけ差が出ます（予約番号で照合済み・欠落はありません）</div>';
 
   // 体験KPI（必要数の逆算）と時間帯分析
   html += '<h3 style="margin:10px 0 4px">体験KPI（会員370名への逆算・成約率60%=実績値）</h3>';
