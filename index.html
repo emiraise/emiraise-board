@@ -2086,9 +2086,13 @@ async function renderStats(params) {
 
   const storeSet = {};
   const perStaff = {};
+  const staffStoreCnt = {};  // スタッフ×店舗の件数（店舗別枠の消化表示用・フィルタ無関係の全店集計）
   rows.forEach(function(r) {
     const st = r.store_tag || '店舗不明';
     storeSet[st] = true;
+    (r.staff_names || []).forEach(function(sn) {
+      (staffStoreCnt[sn] = staffStoreCnt[sn] || {})[st] = (staffStoreCnt[sn][st] || 0) + 1;
+    });
     if (storeSel && st !== storeSel) return;
     (r.staff_names && r.staff_names.length ? r.staff_names : ['担当未設定']).forEach(function(sn) {
       const o = (perStaff[sn] = perStaff[sn] || { total: 0, done: 0, wk: {}, wkDone: {} });
@@ -2152,6 +2156,8 @@ async function renderStats(params) {
     fillTarget: 60,
     // 個人別のレッスン目標（全体60%より高い期待値を置く人・2026-08-02大地さん指示）
     staffGoal: { 'こうじ': 120, 'まゆ': 110 },
+    // 金沢2店を兼務するスタッフの店舗別枠（2026-08-03大地指示: あやな=各80・まこ=各50。合計は従来と同じ160/100）
+    staffHoursByStore: { 'あやな': { '金沢本店': 80, '金沢駅西店': 80 }, 'まこ': { '金沢本店': 50, '金沢駅西店': 50 } },
     // 店舗損益モデル（2026-08-03・6月P&Lベースの概算。家賃実績は富山東のみ・他は推定→実額が分かり次第差し替え）
     staffPay: { 'こうじ': 36, 'まゆ': 34, 'ねね': 30, 'あやな': 28, 'まこ': 24, 'ゆうか': 39, 'ゆき': 37,
                 'ももか': 27, '林　大地': 46, '齋藤 良気': 40, 'なおみ': 10 },  // 月額・社保込み概算(万円)
@@ -2509,9 +2515,17 @@ async function renderStats(params) {
       const fr = cap ? Math.round(o.total * 100 / cap) : null;
       const pg = GOAL.staffGoal && GOAL.staffGoal[sn];
       const okLine = pg ? Math.round(pg * 100 / cap) : 60;  // 個人目標があればそのラインで色分け
+      let byStoreTxt = '';
+      const hbs = GOAL.staffHoursByStore && GOAL.staffHoursByStore[sn];
+      if (hbs) {
+        byStoreTxt = '<br><small style="color:var(--sub)">' + Object.keys(hbs).map(function(st2) {
+          const c2 = (staffStoreCnt[sn] && staffStoreCnt[sn][st2]) || 0;
+          return st2.replace('金沢', '').replace('店', '') + c2 + '/' + hbs[st2];
+        }).join('・') + '</small>';
+      }
       html += '<td style="font-weight:800">' + o.total + '</td>'
         + '<td>' + o.done + ' / ' + (o.total - o.done) + '</td>'
-        + '<td>' + (fr === null ? '<span style="color:#bbb">-</span>' : '<b style="color:' + (fr >= okLine ? '#2e7d32' : (fr >= okLine * 0.75 ? '#805e12' : '#b3261e')) + '">' + fr + '%</b><small style="color:var(--sub)">/' + cap + '枠' + (pg ? '・目標' + pg : '') + '</small>') + '</td></tr>';
+        + '<td>' + (fr === null ? '<span style="color:#bbb">-</span>' : '<b style="color:' + (fr >= okLine ? '#2e7d32' : (fr >= okLine * 0.75 ? '#805e12' : '#b3261e')) + '">' + fr + '%</b><small style="color:var(--sub)">/' + cap + '枠' + (pg ? '・目標' + pg : '') + '</small>' + byStoreTxt) + '</td></tr>';
     });
     html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td>';
     weeks.forEach(function(w) { html += '<td>' + (colTot[w] || 0) + '</td>'; });
