@@ -1226,7 +1226,8 @@ async function fetchAvail(fromDate, toDateExcl) {
     .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
   return data || [];
 }
-function availFor(av, staffName, dateStr) {
+function availFor(av, staffName, dateStr, store) {
+  av = (av || []).filter(function(x) { return !store || !x.store || x.store === store; });
   return av.filter(function(x) { return nw(x.staff_name) === nw(staffName) && x.date === dateStr; });
 }
 function availBlocksHtml(ranges) {
@@ -1238,7 +1239,7 @@ function availBlocksHtml(ranges) {
     const left = (s - TL_START) / TL_TOTAL * 100;
     const width = (e - s) / TL_TOTAL * 100;
     h += '<div class="avslot" style="left:' + left + '%;width:' + width + '%"'
-      + ' title="' + esc('予約受付可能 ' + x.start_time + '-' + x.end_time + '（STORES公開枠）') + '">空</div>';
+      + ' title="' + esc('予約受付可能 ' + x.start_time + '-' + x.end_time + '（' + (x.store ? x.store + '・' : '') + 'STORES公開枠）') + '">空</div>';
   });
   return h;
 }
@@ -1576,7 +1577,7 @@ async function renderTimeline(params) {
         const sh = shiftFor(dayShifts, st, date);
         html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + shiftTagHtml(sh, codes) + calAllDayChips(calFor(dayCal, st, date)) + '</div><div class="tltrack" data-staff="' + esc(st) + '" data-date="' + date + '">'
           + shiftShadeHtml(sh, codes)
-          + availBlocksHtml(availFor(dayAvail, st, date))
+          + availBlocksHtml(availFor(dayAvail, st, date, storeSel))
           + tbBlocksHtml(blocksFor(dayBlocks, st, date))
           + calBlocksHtml(calFor(dayCal, st, date))
           + tlBlocksHtml(byStaff(rows, st), dayChecks, dayMeta) + '</div></div>';
