@@ -2280,11 +2280,11 @@ async function renderStats(params) {
   // ・和田さん30万込み(8月支払開始・動画編集委託6万の置換で実質+24)・ももか/アコ/澄田=22万+法定福利+交通費≒27万込み
   // （ももか8/14入社=8月は半月14万・アコ10月〜・澄田12月〜）
   const ROADMAP = [
-    { ym: '2026-08', lessons: 700, sales: 630, other: 35, pc: 351, note: '福井高柳 8/14オープン／和田さん給与開始' },
+    { ym: '2026-08', lessons: 700, sales: 630, other: 35, pc: 351, note: '福井高柳 8/14オープン／和田 給与開始' },
     { ym: '2026-09', lessons: 727, sales: 654, other: 40, pc: 364, note: 'ももか30' },
-    { ym: '2026-10', lessons: 755, sales: 680, other: 30, pc: 391, note: 'アコさん採用・研修開始／ももか45' },
+    { ym: '2026-10', lessons: 755, sales: 680, other: 30, pc: 391, note: 'アコ採用・研修開始／ももか45' },
     { ym: '2026-11', lessons: 782, sales: 704, other: 30, pc: 391, note: 'ももか60' },
-    { ym: '2026-12', lessons: 817, sales: 735, other: 30, pc: 585, note: '澄田くん採用／冬ボーナス145万(社保込167万)支給月' },
+    { ym: '2026-12', lessons: 817, sales: 735, other: 30, pc: 585, note: '澄田採用／冬ボーナス145万(社保込167万)支給月' },
     { ym: '2027-01', lessons: 857, sales: 771, other: 30, pc: 418, note: 'アコ実働30／ももか85' },
     { ym: '2027-02', lessons: 917, sales: 825, other: 30, pc: 418, note: 'ももか100=福井単店黒字ライン／澄田実働30' },
     { ym: '2027-03', lessons: 957, sales: 861, other: 30, pc: 418, note: 'アコ70／澄田40' },
@@ -2467,7 +2467,7 @@ async function renderStats(params) {
         + '<tr style="font-weight:800;background:#eef3f1"><td style="text-align:left">営業利益</td><td style="color:' + (profit >= 0 ? '#2e7d32' : '#b3261e') + '">' + (profit >= 0 ? '+' : '') + profit + '万円（利益率' + margin + '%）</td></tr>'
         + '</tbody></table>'
         + '<div style="color:var(--sub);font-size:11px;margin-top:4px">人件費内訳: ' + (payLines.join('／') || 'なし') + '<br>'
-        + '※家賃・固定費は概算（富山東のみP&L実績）。セミナー等・役員業務・本部費(和田さん等)は含みません。実額が分かれば差し替えます</div>'
+        + '※家賃・固定費は概算（富山東のみP&L実績）。セミナー等・役員業務・本部費(和田 等)は含みません。実額が分かれば差し替えます</div>'
         + '</div>';
     });
     html += '<div style="color:var(--sub);font-size:11px;margin:4px 2px 12px">'
