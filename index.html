@@ -2513,8 +2513,19 @@ async function renderStats(params) {
       });
       grandTotal += o.total; grandDone += o.done;
       const hbs = GOAL.staffHoursByStore && GOAL.staffHoursByStore[sn];
-      // 店舗ページでは「その店舗の枠」を分母にする（あやな本店なら/80・全店なら/160）
-      const cap = (storeSel && hbs) ? (hbs[storeSel] || null) : GOAL.staffHours[sn];
+      // 店舗ページでは「その店舗の枠」を分母にする（あやな本店なら/80・全店なら/160）。
+      // 店舗別枠が未設定のスタッフは「一番レッスン数が多い店＝主戦場」でのみ全枠を計上する
+      // （こうじが駅西に2件だけ入った月に駅西キャパへ160枠が丸ごと足される過大計上の防止・2026-08-04）
+      let cap;
+      if (storeSel && hbs) {
+        cap = hbs[storeSel] || null;
+      } else if (storeSel) {
+        const spread = staffStoreCnt[sn] || {};
+        const domStore = Object.keys(spread).sort(function(a2, b2) { return spread[b2] - spread[a2]; })[0];
+        cap = (domStore === storeSel) ? GOAL.staffHours[sn] : null;
+      } else {
+        cap = GOAL.staffHours[sn];
+      }
       if (cap) capTot += cap;
       const fr = cap ? Math.round(o.total * 100 / cap) : null;
       const pg = GOAL.staffGoal && GOAL.staffGoal[sn];
