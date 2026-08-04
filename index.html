@@ -2154,7 +2154,7 @@ async function renderStats(params) {
     // 実拘束時間（月・大地さん申告 2026-08-02。みわさん退職・アコさん10月研修開始→4月正社員160）
     staffHours: { 'こうじ': 160, 'まゆ': 160, 'ねね': 160, 'あやな': 160, 'ゆうか': 160, 'ももか': 160,
                   'まこ': 100, '齋藤 良気': 100, 'ゆき': 120, '林　大地': 80, 'なおみ': 45 },
-    fillTarget: 60,
+    fillTarget: 65,  // 全体埋まり率の目標（2026-08-04 大地決定・60→65%）
     // 個人別のレッスン目標（全体60%より高い期待値を置く人・2026-08-02大地さん指示）
     staffGoal: { 'こうじ': 120, 'まゆ': 110 },
     // 金沢2店を兼務するスタッフの店舗別枠（2026-08-03大地指示: あやな=各80・まこ=各50。合計は従来と同じ160/100）
@@ -2214,9 +2214,12 @@ async function renderStats(params) {
   let totalCap = 0;
   Object.keys(GOAL.staffHours).forEach(function(k2) { totalCap += GOAL.staffHours[k2]; });
   const fillPct = totalCap ? Math.round(totalLessons * 1000 / totalCap) / 10 : 0;
+  const gapLessons = Math.max(0, Math.ceil(totalCap * GOAL.fillTarget / 100 - totalLessons));
   html += '<div><div style="color:var(--sub);font-size:12px">枠消化率（実拘束' + totalCap.toLocaleString() + '枠）</div>'
     + '<div style="font-size:22px;font-weight:800">' + fillPct + '%<small style="font-size:12px;color:var(--sub)"> / 目標' + GOAL.fillTarget + '%</small></div>'
-    + gbar(fillPct * 100 / GOAL.fillTarget, '#8a5aa5') + '</div>';
+    + gbar(fillPct * 100 / GOAL.fillTarget, '#8a5aa5')
+    + (gapLessons > 0 ? '<div style="font-size:12px;margin-top:3px;color:#b3261e;font-weight:700">65%まで あと' + gapLessons + 'レッスン（≒' + Math.round(gapLessons * 0.874) + '万円）</div>'
+       : '<div style="font-size:12px;margin-top:3px;color:#2e7d32;font-weight:700">🎉 目標65%達成中</div>') + '</div>';
   html += '</div>';
 
   // ── 👥 役割別KPI（大地さん=新規獲得／良気くん=LTV・定着。新規→定着の上下流・2026-08-03設計） ──
@@ -2544,8 +2547,10 @@ async function renderStats(params) {
     html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td>';
     weeks.forEach(function(w) { html += '<td>' + (colTot[w] || 0) + '</td>'; });
     const totFr = capTot ? Math.round(grandTotal * 100 / capTot) : null;
+    const totGap = capTot ? Math.max(0, Math.ceil(capTot * GOAL.fillTarget / 100 - grandTotal)) : 0;
     html += '<td>' + grandTotal + '</td><td>' + grandDone + ' / ' + (grandTotal - grandDone) + '</td>'
-      + '<td>' + (totFr === null ? '' : '<b style="color:' + (totFr >= 60 ? '#2e7d32' : (totFr >= 45 ? '#805e12' : '#b3261e')) + '">' + totFr + '%</b><small style="color:var(--sub)">/最大' + capTot + '枠</small>') + '</td></tr>';
+      + '<td>' + (totFr === null ? '' : '<b style="color:' + (totFr >= GOAL.fillTarget ? '#2e7d32' : (totFr >= 45 ? '#805e12' : '#b3261e')) + '">' + totFr + '%</b><small style="color:var(--sub)">/最大' + capTot + '枠</small>'
+      + (totGap > 0 ? '<br><small style="color:#b3261e;font-weight:700">65%まで あと' + totGap + '</small>' : '<br><small style="color:#2e7d32;font-weight:700">🎉 65%達成</small>')) + '</td></tr>';
     html += '</tbody></table></div>';
     html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">確定予約のみ・キャンセルとスタッフ内部予約（除外名簿）は含みません。週は月曜始まり。「済」は現時点で終了したレッスン、「予定」はこれからの予約。月合計はその月の1日〜末日のレッスン数。合計行の「最大◯枠」＝この表にいるスタッフの出勤枠の合計（店舗ページでは店舗別枠で計算）＝その月の最大キャパです</div>';
   }
