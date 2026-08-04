@@ -2157,6 +2157,8 @@ async function renderStats(params) {
     fillTarget: 65,  // 全体埋まり率の目標（2026-08-04 大地決定・60→65%）
     // 個人別のレッスン目標（全体60%より高い期待値を置く人・2026-08-02大地さん指示）
     staffGoal: { 'こうじ': 120, 'まゆ': 110 },
+    // 個人別の埋まり率目標%（2026-08-04大地指示: ゆうか80%・良気70%。未設定は全体目標65%）
+    staffFillGoal: { 'ゆうか': 80, '齋藤 良気': 70 },
     // 金沢2店を兼務するスタッフの店舗別枠（2026-08-03大地指示: あやな=各80・まこ=各50。合計は従来と同じ160/100）
     staffHoursByStore: { 'あやな': { '金沢本店': 80, '金沢駅西店': 80 }, 'まこ': { '金沢本店': 50, '金沢駅西店': 50 }, 'ねね': { '金沢駅西店': 100, '福井高柳店': 60 }, '林　大地': { '金沢本店': 60, '金沢駅西店': 40 } },
     // 店舗損益モデル（2026-08-03・6月P&Lベースの概算。家賃実績は富山東のみ・他は推定→実額が分かり次第差し替え）
@@ -2584,7 +2586,9 @@ async function renderStats(params) {
       if (cap) capTot += cap;
       const fr = cap ? Math.round(o.total * 100 / cap) : null;
       const pg = GOAL.staffGoal && GOAL.staffGoal[sn];
-      const okLine = (pg && cap && !storeSel) ? Math.round(pg * 100 / cap) : 60;  // 個人目標は全店表示のときだけ適用
+      const fillG = GOAL.staffFillGoal && GOAL.staffFillGoal[sn];
+      // 判定ライン: 個人埋まり率目標% > 個人レッスン目標(全店のみ) > 全体目標65%
+      const okLine = fillG ? fillG : ((pg && cap && !storeSel) ? Math.round(pg * 100 / cap) : GOAL.fillTarget);
       let byStoreTxt = '';
       if (hbs && !storeSel) {
         byStoreTxt = '<br><small style="color:var(--sub)">' + Object.keys(hbs).map(function(st2) {
@@ -2594,7 +2598,7 @@ async function renderStats(params) {
       }
       html += '<td style="font-weight:800">' + o.total + '</td>'
         + '<td>' + o.done + ' / ' + (o.total - o.done) + '</td>'
-        + '<td>' + (fr === null ? '<span style="color:#bbb">-</span>' : '<b style="color:' + (fr >= okLine ? '#2e7d32' : (fr >= okLine * 0.75 ? '#805e12' : '#b3261e')) + '">' + fr + '%</b><small style="color:var(--sub)">/' + cap + '枠' + (pg && !storeSel ? '・目標' + pg : '') + '</small>' + byStoreTxt) + '</td></tr>';
+        + '<td>' + (fr === null ? '<span style="color:#bbb">-</span>' : '<b style="color:' + (fr >= okLine ? '#2e7d32' : (fr >= okLine * 0.75 ? '#805e12' : '#b3261e')) + '">' + fr + '%</b><small style="color:var(--sub)">/' + cap + '枠' + (fillG ? '・目標' + fillG + '%' : (pg && !storeSel ? '・目標' + pg : '')) + '</small>' + byStoreTxt) + '</td></tr>';
     });
     html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td>';
     weeks.forEach(function(w) { html += '<td>' + (colTot[w] || 0) + '</td>'; });
