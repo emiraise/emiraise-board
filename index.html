@@ -2307,7 +2307,7 @@ async function renderStats(params) {
       + '<span><span class="badge" style="background:' + storeColor(st) + ';font-size:9.5px">' + esc(st) + '</span></span>'
       + '<span>' + a + ' / ' + TRIAL_TGT[st] + '</span></div>';
   });
-  html += '<div style="font-size:12px;margin-top:6px;color:var(--sub)">成約 ' + convM + '名（体験1名=月商+1.6万円/月）</div>'
+  html += '<div style="font-size:12px;margin-top:6px;color:var(--sub)">成約 ' + convM + '名（体験1名=成約60%×月3回×8,740円=+1.6万円/月）</div>'
     + '</div>';
   // 良気くん: LTV・定着
   html += '<div style="border:1.5px solid #5a67a5;border-radius:12px;padding:10px 12px">'
@@ -2316,7 +2316,7 @@ async function renderStats(params) {
     + gbar(nextRate * 100 / 90, '#5a67a5')
     + '<div style="font-size:13px;margin-top:6px">今月の退会 <b style="color:' + (quitM > Math.ceil(curMembers * 0.03) ? '#b3261e' : '#2e7d32') + '">' + quitM + '名</b>'
     + '（退会率' + (curMembers + quitM ? Math.round(quitM * 1000 / (curMembers + quitM)) / 10 : 0) + '%・目標3%以下）／ 休会 ' + suspM + '名</div>'
-    + '<div style="font-size:12px;margin-top:6px;color:var(--sub)">次回予約なしの会員' + (curMembers - withNext) + '名が最優先フォロー対象（日報タブに個人名リスト）。退会1名減=月商+2.7万円の防衛</div>'
+    + '<div style="font-size:12px;margin-top:6px;color:var(--sub)">次回予約なしの会員' + (curMembers - withNext) + '名が最優先フォロー対象（日報タブに個人名リスト）。退会1名減=月商+2.6万円の防衛</div>'
     + '</div>';
   html += '</div>';
 
@@ -2381,9 +2381,9 @@ async function renderStats(params) {
   });
   html += '</tbody></table></div>';
   html += '<div style="font-size:12.5px;line-height:1.9;margin:6px 2px;padding:8px 10px;background:#eef3f1;border-radius:10px">'
-    + '<b>📐 新規KPIの換算式（広告・LINE誘導の判断基準）</b><br>'
-    + '体験1名 ＝ 成約率60% ＝ 月商<b>+1.6万円/月</b>の継続売上（成約1名＝+2.7万円/月・LTV 15〜20万円）<br>'
-    + '月商を+100万円するには ＝ 会員+37名 ＝ 体験62名ぶん。広告CPA（体験1件獲得単価）は<b>1〜2万円まで採算内</b><br>'
+    + '<b>📐 新規KPIの換算式（実測値ベース: 成約率60%・月3回コース・実効単価8,740円）</b><br>'
+    + '体験1名 ＝ 成約60% × 月3回 × 8,740円 ＝ 月商<b>+1.6万円/月</b>の継続売上（成約1名＝+2.6万円/月・LTV 15〜20万円）<br>'
+    + '月商を+100万円するには ＝ 会員+38名 ＝ 体験64名ぶん。広告CPA（体験1件獲得単価）は<b>1〜2万円まで採算内</b><br>'
     + '必要ペース: <b>全社で体験 約40名/月（成約24名）</b>＝駅西10・本店8・福井11・富山東8・天王寺3（福井は新店で体験比率が高い前提・富山東の立ち上げ実績13〜16名/月が根拠）</div>';
   html += '<div style="color:var(--sub);font-size:11px;margin:4px 2px 10px">'
     + 'セミナー等は計画値30万/月(実績: 7月100万・変動30〜50万)。コンサル事業は別途検討。'
