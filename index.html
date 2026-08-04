@@ -2217,10 +2217,14 @@ async function renderStats(params) {
   const gapLessons = Math.max(0, Math.ceil(totalCap * GOAL.fillTarget / 100 - totalLessons));
   html += '<div><div style="color:var(--sub);font-size:12px">枠消化率（実拘束' + totalCap.toLocaleString() + '枠）</div>'
     + '<div style="font-size:22px;font-weight:800">' + fillPct + '%<small style="font-size:12px;color:var(--sub)"> / 目標' + GOAL.fillTarget + '%</small></div>'
-    + gbar(fillPct * 100 / GOAL.fillTarget, '#8a5aa5')
-    + (gapLessons > 0 ? '<div style="font-size:12px;margin-top:3px;color:#b3261e;font-weight:700">65%まで あと' + gapLessons + 'レッスン（≒' + Math.round(gapLessons * 0.874) + '万円）</div>'
-       : '<div style="font-size:12px;margin-top:3px;color:#2e7d32;font-weight:700">🎉 目標65%達成中</div>') + '</div>';
+    + gbar(fillPct * 100 / GOAL.fillTarget, '#8a5aa5') + '</div>';
   html += '</div>';
+  // 65%ギャップの強調表示（ひと目で「あと何レッスン・いくら分か」が分かるストリップ）
+  html += (gapLessons > 0
+    ? '<div style="background:#fdecec;border:1.5px solid #e8b4b4;border-radius:12px;padding:9px 14px;margin:2px 0 10px;font-size:15px;font-weight:800;color:#8f1d16">'
+      + '🎯 目標埋まり率65%まで <span style="font-size:20px">あと' + gapLessons + 'レッスン</span>'
+      + '　<span style="color:#5a4a1e">＝ 売上換算 約' + Math.round(gapLessons * 0.874) + '万円/月</span></div>'
+    : '<div style="background:#e8f3ec;border:1.5px solid #b4d4c0;border-radius:12px;padding:9px 14px;margin:2px 0 10px;font-size:15px;font-weight:800;color:#1e5c38">🎉 目標埋まり率65%を達成中！次の目標設定を検討しましょう</div>');
 
   // ── 👥 役割別KPI（大地さん=新規獲得／良気くん=LTV・定着。新規→定着の上下流・2026-08-03設計） ──
   const futRes = await fetchRange(todayS, addDays(todayS, 92));
@@ -2242,6 +2246,25 @@ async function renderStats(params) {
     return cu ? (cu.subscriptions || []).length : 0;
   }
   const trialTotalTgt = 40;
+  // ── 📐 体制別の売上アッパー（スタッフが増えると上限がどう変わるか） ──
+  const UNIT = 0.874;
+  const SCENARIOS = [
+    { label: '現体制（11名）', cap: totalCap, note: '' },
+    { label: '＋アコ 160枠（2027年4月〜）', cap: totalCap + 160, note: '' },
+    { label: '＋住田 戦力化 160枠', cap: totalCap + 320, note: 'ここで65%運用でも1,000万圏' },
+  ];
+  html += '<h3 style="margin:10px 0 4px">📐 体制別の売上アッパー（実効単価8,740円換算）</h3>';
+  html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr><th style="text-align:left">体制</th><th>枠数</th><th>65%運用時</th><th>100%理論値</th></tr></thead><tbody>';
+  SCENARIOS.forEach(function(sc) {
+    const l65 = Math.round(sc.cap * 0.65);
+    html += '<tr><td style="text-align:left">' + sc.label + (sc.note ? ' <small style="color:#2e7d32;font-weight:700">' + sc.note + '</small>' : '') + '</td>'
+      + '<td>' + sc.cap.toLocaleString() + '枠</td>'
+      + '<td style="font-weight:700">' + l65 + 'レッスン ≒ ' + Math.round(l65 * UNIT) + '万円</td>'
+      + '<td style="color:var(--sub)">' + Math.round(sc.cap * UNIT) + '万円</td></tr>';
+  });
+  html += '</tbody></table></div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:2px 2px 10px">スタッフの枠設定（staffHours）を変えると自動で再計算。65%運用で月商1,000万に必要な枠数 ≒ 1,760枠 ＝ 現体制+フル2名ぶん。採用のタイミング判断はこの表とロードマップで</div>';
+
   html += '<h3 style="margin:10px 0 4px">👥 役割別KPI（' + mo + '月）</h3>';
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin:4px 0 10px">';
   // 大地さん: 新規獲得
