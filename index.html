@@ -2264,18 +2264,39 @@ async function renderStats(params) {
   const withNext = activeKeys.filter(function(k2) { return futSet[k2]; }).length;
   const nextRate = curMembers ? Math.round(withNext * 100 / curMembers) : 0;
   const TRIAL_TGT = { '金沢本店': 8, '金沢駅西店': 10, '富山東店': 8, '福井高柳店': 11, '天王寺店': 3 };  // 2026-08-03再配分: 福井厚め・金沢2店で18
+  // 成約の定義（2026-08-05大地決定）: 体験のお客様に「体験より後の予約」が入っていること
+  // （天王寺=ワンモアも同名なら同じ顧客キーになるため、同名の2回目予約で自動判定される）
+  const bookTimes = {};
+  rows.forEach(function(r) {
+    if (!r.customer_id) return;
+    (bookTimes[custKey(r.merchant_id, r.customer_id)] = bookTimes[custKey(r.merchant_id, r.customer_id)] || []).push(r.booking_start);
+  });
   const trialByStore = {};
   let convM = 0;
+  const convCourse = {};
   rows.forEach(function(r) {
     if (!isTrialR0(r)) return;
     const st = r.store_tag || '店舗不明';
     trialByStore[st] = (trialByStore[st] || 0) + 1;
-    if ((subsOf0(r)) > 0) convM++;
-  });
-  function subsOf0(r) {
+    const k3 = custKey(r.merchant_id, r.customer_id);
+    const hasNext = (bookTimes[k3] || []).some(function(t) { return t > r.booking_start; }) || futSet[k3];
+    if (!hasNext) return;
+    convM++;
+    // 何を購入したか（月謝コース名→回数券→予約のみ）
     const cu = custs.find(function(c2) { return c2.merchant_id === r.merchant_id && String(c2.customer_id) === String(r.customer_id); });
-    return cu ? (cu.subscriptions || []).length : 0;
-  }
+    let label = '予約のみ（購入情報なし）';
+    if (cu) {
+      const act = (cu.subscriptions || []).filter(function(sub) { return sub.contract_status === 'active'; })[0];
+      if (act) {
+        const m3 = String(act.product_name || '').replace(/[０-９]/g, function(c3) { return String.fromCharCode(c3.charCodeAt(0) - 65248); }).match(/月\s*(\d+)\s*回|(\d+)\s*回/);
+        label = m3 ? '月' + (m3[1] || m3[2]) + '回コース' : (act.product_name || 'コース');
+      } else if ((cu.ticket_books || []).length) {
+        label = '回数券';
+      }
+    }
+    convCourse[label] = (convCourse[label] || 0) + 1;
+  });
+  const convDetail = Object.keys(convCourse).map(function(k4) { return k4 + '×' + convCourse[k4]; }).join('・');
   const trialTotalTgt = 40;
   // ── 📐 体制別の売上アッパー（スタッフが増えると上限がどう変わるか） ──
   const UNIT = 0.874;
@@ -2309,7 +2330,8 @@ async function renderStats(params) {
       + '<span><span class="badge" style="background:' + storeColor(st) + ';font-size:9.5px">' + esc(st) + '</span></span>'
       + '<span>' + a + ' / ' + TRIAL_TGT[st] + '</span></div>';
   });
-  html += '<div style="font-size:12px;margin-top:6px;color:var(--sub)">成約 ' + convM + '名（体験1名=成約60%×月3回×8,740円=+1.6万円/月）</div>'
+  html += '<div style="font-size:12.5px;margin-top:6px"><b>成約 ' + convM + '名</b>（次回予約あり=成約）' + (convDetail ? '<br><small style="color:var(--sub)">内訳: ' + esc(convDetail) + '</small>' : '') + '</div>'
+    + '<div style="font-size:11px;margin-top:4px;color:var(--sub)">体験数はSTORES同期で5分ごと自動更新。成約=体験より後の予約が入った人（天王寺は同名の2回目予約）。換算: 体験1名=成約60%×月3回×8,740円=+1.6万円/月</div>'
     + '</div>';
   // 良気くん: LTV・定着
   html += '<div style="border:1.5px solid #5a67a5;border-radius:12px;padding:10px 12px">'
