@@ -161,6 +161,7 @@
   .compass { font-weight:800; font-size:12.5px; letter-spacing:.06em; color:#7a5c1e; background:linear-gradient(135deg, #f3e7c8, #e8d5a3); padding:6px 13px; border-radius:999px; text-decoration:none; box-shadow:2px 2px 5px var(--sd, rgba(0,0,0,.12)), -2px -2px 5px var(--sl, rgba(255,255,255,.7)); margin-left:10px; white-space:nowrap; }
   .compass:hover { filter:brightness(1.04); }
   .compass.on { box-shadow:inset 2px 2px 5px rgba(122,92,30,.3); }
+  .stblk { position:absolute; top:4px; bottom:4px; border-radius:8px; background:repeating-linear-gradient(135deg, #cdd3d8 0 6px, #bcc4cb 6px 12px); color:#39424a; font-size:9.5px; display:flex; align-items:center; justify-content:center; overflow:hidden; z-index:0; }
   .moncal { position:absolute; z-index:60; background:var(--bg, #fff); border:1px solid var(--line); border-radius:14px; padding:10px; box-shadow:0 8px 24px rgba(0,0,0,.18); }
   .moncal .mc-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px; }
   .moncal .mc-head button { border:none; background:none; font-size:16px; cursor:pointer; padding:2px 10px; }
@@ -1220,6 +1221,53 @@ function shiftShadeHtml(sh, codes) {
   if (cur < TL_END) h += _shoffDiv(cur, TL_END);
   return h;
 }
+// STORESブロックの推定表示: シフト中なのに「予約も空き枠も手動ブロックも無い」時間 ≒ STORES側でブロック中
+// （STORESのブロックはAPI非公開のため、公開空き枠からの逆算で可視化する・2026-08-07大地要望）
+function stBlockedEstHtml(sh, codes, availRanges, bookings, manualBlocks, dateStr, todayStr) {
+  // 空き枠データの対象期間（今日〜約4週間先）だけで推定する
+  if (!dateStr || dateStr < todayStr || dateStr > addDays(todayStr, 27)) return '';
+  if (!sh || sh.kind !== 'work') return '';
+  let src = null;
+  if (sh.start_time) src = sh;
+  else if (sh.code && codes[sh.code] && codes[sh.code].start_time) src = codes[sh.code];
+  if (!src) return '';
+  let segs = [[Math.max(hm2m(src.start_time), TL_START), Math.min(hm2m(src.end_time), TL_END)]];
+  if (src.start2) segs.push([Math.max(hm2m(src.start2), TL_START), Math.min(hm2m(src.end2), TL_END)]);
+  // 差し引く区間: 空き枠・予約・手動ブロック
+  const cuts = [];
+  (availRanges || []).forEach(function(x) { cuts.push([hm2m(x.start_time), hm2m(x.end_time)]); });
+  (bookings || []).forEach(function(r) {
+    const st2 = fmtTime(r.booking_start), en2 = fmtTime(r.booking_end);
+    if (st2 && en2) cuts.push([hm2m(st2), hm2m(en2) || (hm2m(st2) + 60)]);
+  });
+  (manualBlocks || []).forEach(function(b) {
+    if (b.start_time) cuts.push([hm2m(b.start_time), hm2m(b.end_time || '21:00')]);
+    else cuts.push([TL_START, TL_END]);
+  });
+  cuts.sort(function(a, b) { return a[0] - b[0]; });
+  let h = '';
+  segs.forEach(function(sg) {
+    let cur = sg[0];
+    const pieces = [];
+    cuts.forEach(function(c) {
+      const cs = Math.max(c[0], sg[0]), ce = Math.min(c[1], sg[1]);
+      if (ce <= cs) return;
+      if (cs > cur) pieces.push([cur, cs]);
+      cur = Math.max(cur, ce);
+    });
+    if (cur < sg[1]) pieces.push([cur, sg[1]]);
+    pieces.forEach(function(pz) {
+      if (pz[1] - pz[0] < 30) return;  // 30分未満の隙間は無視
+      const left = (pz[0] - TL_START) / TL_TOTAL * 100;
+      const width = (pz[1] - pz[0]) / TL_TOTAL * 100;
+      const t1 = String(Math.floor(pz[0] / 60)).padStart(2, '0') + ':' + String(pz[0] % 60).padStart(2, '0');
+      const t2 = String(Math.floor(pz[1] / 60)).padStart(2, '0') + ':' + String(pz[1] % 60).padStart(2, '0');
+      h += '<div class="stblk" style="left:' + left + '%;width:' + width + '%" title="' + esc('🚫 STORES側でブロック中とみられる時間（' + t1 + '-' + t2 + '・空き枠なし/予約なし）') + '">🚫</div>';
+    });
+  });
+  return h;
+}
+
 // STORES公開予約ページの「実質予約可能な枠」（10分ごと自動更新）
 async function fetchAvail(fromDate, toDateExcl) {
   const { data } = await sb.from('crm_avail_slots').select('*')
@@ -1577,13 +1625,14 @@ async function renderTimeline(params) {
         const sh = shiftFor(dayShifts, st, date);
         html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + shiftTagHtml(sh, codes) + calAllDayChips(calFor(dayCal, st, date)) + '</div><div class="tltrack" data-staff="' + esc(st) + '" data-date="' + date + '">'
           + shiftShadeHtml(sh, codes)
+          + stBlockedEstHtml(sh, codes, availFor(dayAvail, st, date, storeSel), byStaff(rows, st), blocksFor(dayBlocks, st, date), date, jstToday())
           + availBlocksHtml(availFor(dayAvail, st, date, storeSel))
           + tbBlocksHtml(blocksFor(dayBlocks, st, date))
           + calBlocksHtml(calFor(dayCal, st, date))
           + tlBlocksHtml(byStaff(rows, st), dayChecks, dayMeta) + '</div></div>';
       });
       html += '</div></div>';
-      html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px"><span style="color:#1f6f54;font-weight:700">緑点線「空」＝今お客様が予約できる枠（STORES公開情報・10分ごと更新）</span>｜斜線＝シフト外・休み・会議（シフト表/カレンダーから自動）｜グレー＝固定ブロック（休憩・休み）｜<span style="color:#805e12;font-weight:700">琥珀↔＝動かせるブロック</span>。緑もグレーも無い時間＝STORES側でブロック済みか受付対象外です</div>';
+      html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px"><span style="color:#1f6f54;font-weight:700">緑点線「空」＝今お客様が予約できる枠（STORES公開情報・10分ごと更新）</span>｜斜線＝シフト外・休み・会議（シフト表/カレンダーから自動）｜グレー＝固定ブロック（休憩・休み）｜<span style="color:#805e12;font-weight:700">琥珀↔＝動かせるブロック</span>。🚫模様＝STORES側でブロック中とみられる時間（空き枠からの逆算・推定）です</div>';
     }
     app.innerHTML = html;
     const rerenderDay = function() { renderTimeline(params); };
