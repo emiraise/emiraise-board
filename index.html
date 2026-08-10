@@ -161,7 +161,8 @@
   .compass { font-weight:800; font-size:12.5px; letter-spacing:.06em; color:#7a5c1e; background:linear-gradient(135deg, #f3e7c8, #e8d5a3); padding:6px 13px; border-radius:999px; text-decoration:none; box-shadow:2px 2px 5px var(--sd, rgba(0,0,0,.12)), -2px -2px 5px var(--sl, rgba(255,255,255,.7)); margin-left:10px; white-space:nowrap; }
   .compass:hover { filter:brightness(1.04); }
   .compass.on { box-shadow:inset 2px 2px 5px rgba(122,92,30,.3); }
-  .stbreal { position:absolute; top:4px; bottom:4px; border-radius:8px; background:#8a94a0; color:#fff; font-size:10px; font-weight:700; display:flex; align-items:center; padding:0 6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; z-index:1; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+  .stbreal { position:absolute; top:4px; bottom:4px; border-radius:8px; background:#7d8896; color:#fff; font-size:10.5px; font-weight:700; line-height:1.25; display:flex; align-items:center; padding:0 5px; overflow:hidden; z-index:1; box-shadow:0 1px 3px rgba(0,0,0,.2); cursor:help; }
+  .stbreal span { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; word-break:break-all; }
   .stblk { position:absolute; top:4px; bottom:4px; border-radius:8px; background:repeating-linear-gradient(135deg, #cdd3d8 0 6px, #bcc4cb 6px 12px); color:#39424a; font-size:9.5px; display:flex; align-items:center; justify-content:center; overflow:hidden; z-index:0; }
   .moncal { position:absolute; z-index:60; background:var(--bg, #fff); border:1px solid var(--line); border-radius:14px; padding:10px; box-shadow:0 8px 24px rgba(0,0,0,.18); }
   .moncal .mc-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px; }
@@ -1243,9 +1244,10 @@ function storesBlocksHtml(items) {
       width = (e2 - s2) / TL_TOTAL * 100;
     }
     const memo = (b.memo || '').replace(/\s+/g, ' ').trim();
+    if (width < 3.2) width = 3.2;  // 10分ブロックでも文字が見えるよう最低幅を確保
     h += '<div class="stbreal" style="left:' + left + '%;width:' + width + '%"'
-      + ' title="' + esc('🚫 STORESブロック ' + (b.start_time || '終日') + '-' + (b.end_time || '') + (memo ? '：' + memo : '（理由なし）')) + '">'
-      + '🚫' + esc(memo || 'ブロック') + '</div>';
+      + ' title="' + esc('🚫 STORESブロック ' + (b.all_day ? '終日' : (b.start_time || '') + '-' + (b.end_time || '')) + (memo ? '：' + memo : '（理由の記入なし）')) + '">'
+      + '<span>' + esc(memo || '理由なし') + '</span></div>';
   });
   return h;
 }
@@ -1699,9 +1701,10 @@ async function renderTimeline(params) {
       nextKey = { ym: addDays(last, 1).slice(0, 7), staff: staff, date: date };
     }
     const endExcl = addDays(start, daysN);
-    const [resQ, checks, blocks, shifts, codes, calEvts, avail] = await Promise.all([
+    const [resQ, checks, blocks, shifts, codes, calEvts, avail, stBlocksAll] = await Promise.all([
       fetchRange(start, endExcl), fetchChecks(start, endExcl), fetchBlocks(start, endExcl),
       fetchShifts(start, endExcl), shiftCodes(), fetchCalEvents(start, endExcl), fetchAvail(start, endExcl),
+      fetchStoresBlocks(start, endExcl),
     ]);
     if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
     const data = resQ.data || [];
@@ -1755,6 +1758,7 @@ async function renderTimeline(params) {
           html += '<div class="tlrow"><div class="tlname">' + esc(st) + shiftTagHtml(sh, codes) + calAllDayChips(calFor(calEvts, st, d)) + '</div><div class="tltrack" data-staff="' + esc(st) + '" data-date="' + d + '">'
             + shiftShadeHtml(sh, codes)
             + availBlocksHtml(availFor(avail, st, d))
+            + storesBlocksHtml(sbFor(stBlocksAll, st, d))
             + tbBlocksHtml(blocksFor(blocks, st, d))
             + calBlocksHtml(calFor(calEvts, st, d))
             + tlBlocksHtml(byStaff(dayRows, st), checks, wkMeta)
@@ -1767,6 +1771,7 @@ async function renderTimeline(params) {
           + '<div class="tltrack" data-staff="' + esc(staff) + '" data-date="' + d + '">'
           + shiftShadeHtml(sh, codes)
           + availBlocksHtml(availFor(avail, staff, d))
+          + storesBlocksHtml(sbFor(stBlocksAll, staff, d))
           + tbBlocksHtml(blocksFor(blocks, staff, d))
           + calBlocksHtml(calFor(calEvts, staff, d))
           + tlBlocksHtml(byStaff(dayRows, staff), checks, wkMeta)
