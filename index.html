@@ -1643,6 +1643,10 @@ async function renderTimeline(params) {
     shiftStaffs(dayShifts, date).forEach(function(sn) {
       if (!staffs.some(function(x) { return nw(x) === nw(sn); })) staffs.push(sn);
     });
+    // ブロック（STORES/ワンモアの内部枠）だけの人も行を出す（良気・なおみ等・2026-08-11）
+    (dayStBlocks || []).forEach(function(b) {
+      if (b.date === date && !staffs.some(function(x) { return nw(x) === nw(b.staff_name); })) staffs.push(b.staff_name);
+    });
     // 店舗で絞り込み中は、その店舗に予約またはシフトがある人だけ表示
     if (storeSel) {
       staffs = staffs.filter(function(st) {
@@ -1725,6 +1729,9 @@ async function renderTimeline(params) {
     shiftStaffs(shifts, null).forEach(function(sn) {
       if (!staffs.some(function(x) { return nw(x) === nw(sn); })) staffs.push(sn);
     });
+    (stBlocksAll || []).forEach(function(b) {
+      if (!staffs.some(function(x) { return nw(x) === nw(b.staff_name); })) staffs.push(b.staff_name);
+    });
     sortStaffs(staffs);
     if (!staff) {
       const mine = await myStaffName();
@@ -1759,6 +1766,9 @@ async function renderTimeline(params) {
         let ds = staffSet(dayRows);
         shiftStaffs(shifts, d).forEach(function(sn) {
           if (!ds.some(function(x) { return nw(x) === nw(sn); })) ds.push(sn);
+        });
+        (stBlocksAll || []).forEach(function(b) {
+          if (b.date === d && !ds.some(function(x) { return nw(x) === nw(b.staff_name); })) ds.push(b.staff_name);
         });
         sortStaffs(ds);
         if (!ds.length) {
