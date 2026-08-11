@@ -1408,7 +1408,7 @@ function blocksFor(blocks, staffName, dateStr) {
   });
 }
 // スタッフの表示順（2026-08-28 大地指示・全ビュー共通）
-const STAFF_ORDER = ['林　大地', 'こうじ', 'あやな', 'ねね', 'まこ', 'まゆ', 'ゆうか', 'ゆき', 'なおみ', '齋藤 良気', 'ももか'];
+const STAFF_ORDER = ['林　大地', '齋藤 良気', 'こうじ', 'あやな', 'ねね', 'まこ', 'まゆ', 'ゆうか', 'ゆき', 'なおみ', 'ももか'];
 function staffRank(name) {
   const i = STAFF_ORDER.findIndex(function(x) { return nw(x) === nw(name); });
   return i < 0 ? 99 : i;
