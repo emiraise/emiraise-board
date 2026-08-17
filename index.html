@@ -522,7 +522,7 @@ async function renderCustomer(mid, cid) {
   const nowIso = new Date().toISOString();
   const [cRes, histRes, karteRes, lbRes, exRes, hoRes, poolRes] = await Promise.all([
     sb.from('crm_customers').select('*').eq('merchant_id', mid).eq('customer_id', cid).maybeSingle(),
-    sb.from('crm_reservations').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('booking_start', { ascending: false }).limit(100),
+    sb.from('crm_reservations').select('*').eq('merchant_id', mid).eq('customer_id', cid).eq('status', 'accepted').order('booking_start', { ascending: false }).limit(100),
     sb.from('crm_karte_notes').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('created_at', { ascending: false }).limit(50),
     sb.from('crm_customer_labels').select('*').eq('merchant_id', mid).eq('customer_id', cid).maybeSingle(),
     sb.from('crm_exercise_notes').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('created_at', { ascending: false }).limit(100),
@@ -550,7 +550,7 @@ async function renderCustomer(mid, cid) {
   if (linked.length) {
     const jobs = [];
     linked.forEach(function(x) {
-      jobs.push(sb.from('crm_reservations').select('*').eq('merchant_id', x.merchant_id).eq('customer_id', x.customer_id).order('booking_start', { ascending: false }).limit(100));
+      jobs.push(sb.from('crm_reservations').select('*').eq('merchant_id', x.merchant_id).eq('customer_id', x.customer_id).eq('status', 'accepted').order('booking_start', { ascending: false }).limit(100));
       jobs.push(sb.from('crm_karte_notes').select('*').eq('merchant_id', x.merchant_id).eq('customer_id', x.customer_id).order('created_at', { ascending: false }).limit(50));
     });
     const rs = await Promise.all(jobs);
@@ -570,13 +570,21 @@ async function renderCustomer(mid, cid) {
       if (m2) { variants.push(m2[1] + ' ' + m2[2]); variants.push(m2[1] + '　' + m2[2]); }
       const uniqV = variants.filter(function(v, i2) { return v && variants.indexOf(v) === i2; });
       const { data: sameName } = await sb.from('crm_reservations').select('*')
-        .in('customer_name', uniqV).order('booking_start', { ascending: false }).limit(200);
+        .in('customer_name', uniqV).eq('status', 'accepted')  // キャンセルは回数に数えない（2026-08-17修正）
+        .order('booking_start', { ascending: false }).limit(200);
       const seenIds = {};
-      hist.forEach(function(r) { seenIds[r.reservation_id] = true; });
+      const seenSlots = {};  // 同じ日時・同じ店舗は1件だけ（ワンモア/STORES二重登録の除去）
+      hist.forEach(function(r) {
+        seenIds[r.reservation_id] = true;
+        seenSlots[(r.booking_start || '') + '|' + (r.store_tag || '')] = true;
+      });
       (sameName || []).forEach(function(r) {
         if (seenIds[r.reservation_id]) return;
         if (r.merchant_id === mid && String(r.customer_id) === String(cid)) return;
+        const slot = (r.booking_start || '') + '|' + (r.store_tag || '');
+        if (seenSlots[slot]) return;
         seenIds[r.reservation_id] = true;
+        seenSlots[slot] = true;
         hist.push(r);
       });
     }
