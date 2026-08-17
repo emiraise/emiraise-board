@@ -415,7 +415,17 @@ async function renderDay(dateStr) {
     .gte('booking_start', from).lt('booking_start', to)
     .eq('status', 'accepted').order('booking_start');
   if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
-  const data = filterExcl(dataRaw, await exclNames());
+  const dataDedup = [];
+  {
+    const seen = {};
+    filterExcl(dataRaw, await exclNames()).forEach(function(r) {
+      const k = nw(r.customer_name || '') + '|' + (r.booking_start || '') + '|' + (r.store_tag || '');
+      if (r.customer_name && seen[k]) return;
+      seen[k] = true;
+      dataDedup.push(r);
+    });
+  }
+  const data = dataDedup;
   const checks = await fetchChecks(d, addDays(d, 1));
   const meta = await fetchCustMeta(data);
   // 当日カルテを書いたお客様（📝マーク用）と当日のシフト（休みチップ用）
@@ -1061,7 +1071,16 @@ async function fetchRange(fromDate, toDateExcl) {
     all = all.concat(data || []);
     if (!data || data.length < 1000) break;
   }
-  return { data: filterExcl(all, await exclNames()), error: null };
+  // 同じお客様・同じ日時・同じ店舗の重複は1件に（担当違いで二重登録された枠の除去・2026-08-17）
+  const seenSlot = {};
+  const uniq = [];
+  filterExcl(all, await exclNames()).forEach(function(r) {
+    const k = nw(r.customer_name || '') + '|' + (r.booking_start || '') + '|' + (r.store_tag || '');
+    if (r.customer_name && seenSlot[k]) return;
+    seenSlot[k] = true;
+    uniq.push(r);
+  });
+  return { data: uniq, error: null };
 }
 // ── 見た印（対応済みチェック） ─────────────
 async function fetchChecks(fromDate, toDateExcl) {
