@@ -530,9 +530,10 @@ async function renderDay(dateStr) {
 async function renderCustomer(mid, cid) {
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const nowIso = new Date().toISOString();
-  const [cRes, histRes, karteRes, lbRes, exRes, hoRes, poolRes] = await Promise.all([
+  const [cRes, histRes, cancelRes, karteRes, lbRes, exRes, hoRes, poolRes] = await Promise.all([
     sb.from('crm_customers').select('*').eq('merchant_id', mid).eq('customer_id', cid).maybeSingle(),
     sb.from('crm_reservations').select('*').eq('merchant_id', mid).eq('customer_id', cid).eq('status', 'accepted').order('booking_start', { ascending: false }).limit(100),
+    sb.from('crm_reservations').select('*').eq('merchant_id', mid).eq('customer_id', cid).neq('status', 'accepted').order('booking_start', { ascending: false }).limit(50),
     sb.from('crm_karte_notes').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('created_at', { ascending: false }).limit(50),
     sb.from('crm_customer_labels').select('*').eq('merchant_id', mid).eq('customer_id', cid).maybeSingle(),
     sb.from('crm_exercise_notes').select('*').eq('merchant_id', mid).eq('customer_id', cid).order('created_at', { ascending: false }).limit(100),
@@ -542,6 +543,7 @@ async function renderCustomer(mid, cid) {
   const c = cRes.data;
   let hist = histRes.data || [];
   let karte = karteRes.data || [];
+  const cancels = (cancelRes && cancelRes.data) || [];
   const lb = lbRes.data;
   const exNotes = exRes.data || [];
   const handovers = hoRes.data || [];
@@ -826,11 +828,31 @@ async function renderCustomer(mid, cid) {
       let warn = false;
       if (quotaN) {
         head += '／月' + quotaN + '回';
-        if (total < quotaN && curYm >= thisYm) { head += '　⚠️あと' + (quotaN - total) + '回 未予約'; warn = true; }
+        if (total < quotaN && curYm >= thisYm) {
+          const dimM = new Date(parseInt(curYm.slice(0, 4), 10), parseInt(curYm.slice(5, 7), 10), 0).getDate();
+          const todayD = jstToday();
+          const leftDays = curYm === todayD.slice(0, 7) ? (dimM - parseInt(todayD.slice(8, 10), 10) + 1) : dimM;
+          head += '　⚠️あと' + (quotaN - total) + '回 未予約（残り' + leftDays + '日）';
+          warn = true;
+        }
         else if (total >= quotaN) head += ' ✅';
         else head += '（消化' + total + '/' + quotaN + '）';
       }
+      const cxs = cancels.filter(function(x) {
+        return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(x.booking_start)).slice(0, 7) === curYm;
+      });
+      if (cxs.length) head += '　❌キャンセル' + cxs.length + '回';
       html += '<div class="mhead' + (warn ? ' warn' : '') + '">' + esc(head) + '</div>';
+      cxs.forEach(function(x) {
+        html += '<div class="hist" style="opacity:.75">'
+          + '<span class="d" style="text-decoration:line-through">' + fmtDate(x.booking_start) + '</span>'
+          + '<span class="seq" style="color:#b3261e">❌</span>'
+          + '<span style="text-decoration:line-through">' + fmtTime(x.booking_start) + '</span>'
+          + '<span style="flex:1;color:var(--sub)">' + esc(x.menu || '') + '</span>'
+          + '<span class="badge" style="background:#b3261e;font-size:10px">キャンセル</span>'
+          + '<span style="color:var(--sub)">' + esc((x.staff_names || []).join('・')) + '</span>'
+          + '</div>';
+      });
     }
     const future = r.booking_start >= nowIso;
     html += '<div class="hist"><span class="d' + (future ? ' future' : '') + '">' + fmtDate(r.booking_start) + '</span>'
