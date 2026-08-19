@@ -226,6 +226,7 @@
   <a href="#/">予約</a>
   <a href="#/tl">タイムライン</a>
   <a href="#/trial">体験</a>
+  <a href="#/mid">面談</a>
   <a href="#/subs">月謝</a>
   <a href="#/report">日報</a>
   <a href="#/search">検索</a>
@@ -622,6 +623,11 @@ async function renderCustomer(mid, cid) {
       : null,
   };
   const alerts = statAlerts(stat).concat(ticketAlerts(c && c.ticket_books));
+  // 中間カウンセリング: 6回目から予告・8回以上で実施どき（2026-08-18）
+  if (stat.past_visits >= 6) {
+    if (stat.past_visits >= 8) alerts.unshift({ cls: 'warn', text: '🎯 中間カウンセリング実施どき（' + stat.past_visits + '回目）' });
+    else alerts.unshift({ cls: 'mild', text: '🎯 まもなく中間カウンセリング（' + stat.past_visits + '回目／8回目に実施）' });
+  }
   if (lb && lb.body_tags && lb.body_tags.length) alerts.unshift({ cls: 'warn', text: '⚠️ ' + lb.body_tags.join('・') });
   if (alerts.length) {
     html += '<div class="alertrow">';
@@ -2861,6 +2867,124 @@ async function renderStats(params) {
   if (nowBtn) nowBtn.onclick = function() { location.hash = '#/stats'; };
 }
 
+// ── 🎯 中間カウンセリング（8回目でLTVを伸ばす施策・2026-08-18大地設計） ─────
+// 来店8回目のタイミングで面談を実施する。6回目から予告表示して準備できるようにする。
+const MID_TARGET = 8;      // 面談を実施する来店回数
+const MID_NOTICE = 6;      // この回数から予告を出す
+async function renderMidCounseling(params) {
+  app.innerHTML = '<div class="empty">読み込み中…</div>';
+  const storeSel = (params && params.get('store')) || '';
+  const [resQ, custQ, midQ] = await Promise.all([
+    fetchRange(addDays(jstToday(), -400), addDays(jstToday(), 92)),
+    fetchTable('crm_customers', 'merchant_id,customer_id,name,merchant_name,subscriptions'),
+    sb.from('crm_mid_counseling').select('*').limit(2000),
+  ]);
+  if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
+  const rows = resQ.data || [];
+  const custs = custQ.data || [];
+  const midMap = {};
+  ((midQ && midQ.data) || []).forEach(function(m) { midMap[custKey(m.merchant_id, m.customer_id)] = m; });
+
+  const nowIso = new Date().toISOString();
+  // 顧客ごとに「来店済み回数」「次回予約」「店舗」を集計（同名は名寄せして通算）
+  const agg = {};
+  rows.forEach(function(r) {
+    if (!r.customer_name) return;
+    const nm = nw(r.customer_name);
+    const a = (agg[nm] = agg[nm] || { name: r.customer_name, done: 0, next: null, last: null, store: r.store_tag, mid: r.merchant_id, cid: r.customer_id, staff: {} });
+    if (r.booking_start < nowIso) {
+      a.done++;
+      if (!a.last || r.booking_start > a.last) { a.last = r.booking_start; a.store = r.store_tag; }
+      (r.staff_names || []).forEach(function(sn) { a.staff[sn] = (a.staff[sn] || 0) + 1; });
+    } else if (!a.next || r.booking_start < a.next) {
+      a.next = r.booking_start;
+      a.nextStaff = (r.staff_names || []).join('・');
+      a.nextStore = r.store_tag;
+    }
+  });
+  // 顧客マスタのキーを紐付け（顧客ページへのリンク用）
+  custs.forEach(function(cu) {
+    const nm = nw(cu.name || '');
+    if (agg[nm]) { agg[nm].mid = cu.merchant_id; agg[nm].cid = cu.customer_id; agg[nm].subs = cu.subscriptions || []; }
+  });
+
+  const list = Object.keys(agg).map(function(k) { return agg[k]; })
+    .filter(function(a) { return a.done >= MID_NOTICE - 1; })
+    .filter(function(a) { return !storeSel || (a.store === storeSel || a.nextStore === storeSel); });
+
+  // 状態: 実施済み / 実施どき(8回以上) / まもなく(6〜7回)
+  const doneList = [], nowList = [], soonList = [];
+  list.forEach(function(a) {
+    const m = midMap[custKey(a.mid, a.cid)];
+    a.rec = m;
+    if (m && m.done) doneList.push(a);
+    else if (a.done >= MID_TARGET) nowList.push(a);
+    else soonList.push(a);
+  });
+  nowList.sort(function(x, y) { return y.done - x.done; });
+  soonList.sort(function(x, y) { return y.done - x.done; });
+  doneList.sort(function(x, y) { return (y.rec.done_at || '').localeCompare(x.rec.done_at || ''); });
+
+  const storeSet = {};
+  Object.keys(agg).forEach(function(k) { if (agg[k].store) storeSet[agg[k].store] = true; });
+
+  let html = '<h2>🎯 中間カウンセリング（' + MID_TARGET + '回目でLTVを伸ばす）</h2>';
+  html += '<div class="chips"><a class="' + (storeSel ? '' : 'on') + '" href="#/mid">全店</a>';
+  ['金沢本店', '金沢駅西店', '富山東店', '福井高柳店', '天王寺店'].forEach(function(st) {
+    html += '<a class="' + (storeSel === st ? 'on' : '') + '" href="#/mid?store=' + encodeURIComponent(st) + '">' + esc(st) + '</a>';
+  });
+  html += '</div>';
+  html += '<div class="chips">'
+    + '<a style="pointer-events:none;background:#b3261e;border-color:#b3261e;color:#fff">🔴 実施どき ' + nowList.length + '名</a>'
+    + '<a style="pointer-events:none">🟡 まもなく（' + MID_NOTICE + '〜' + (MID_TARGET - 1) + '回） ' + soonList.length + '名</a>'
+    + '<a style="pointer-events:none">✅ 実施済み ' + doneList.length + '名</a>'
+    + '</div>';
+
+  function card(a, kind) {
+    const k = custKey(a.mid, a.cid);
+    const topStaff = Object.keys(a.staff).sort(function(x, y) { return a.staff[y] - a.staff[x]; })[0] || '';
+    const quota = a.subs ? subQuota(a.subs) : 0;
+    return '<div class="hist" style="align-items:center">'
+      + '<span class="seq" style="min-width:52px;font-weight:800;color:' + (kind === 'now' ? '#b3261e' : (kind === 'soon' ? '#805e12' : '#2e7d32')) + '">' + a.done + '回目</span>'
+      + '<a style="flex:1;color:var(--accent);text-decoration:none;font-weight:700" href="#/c/' + encodeURIComponent(a.mid) + '/' + a.cid + '">' + esc(a.name) + '</a>'
+      + '<span class="badge" style="background:' + storeColor(a.store) + ';font-size:10px">' + esc(a.store || '') + '</span>'
+      + (quota ? '<span style="color:var(--sub);font-size:11px">月' + quota + '回</span>' : '')
+      + '<span style="color:var(--sub);font-size:11px">担当' + esc(topStaff) + '</span>'
+      + (a.next ? '<span class="pill">次回 ' + fmtDate(a.next) + '</span>' : '<span class="pill" style="background:#fdecec;color:#b3261e">次回予約なし</span>')
+      + (kind === 'done'
+         ? '<span style="color:var(--sub);font-size:11px">' + (a.rec && a.rec.done_at ? fmtDate(a.rec.done_at) + ' 実施' : '実施済み') + (a.rec && a.rec.done_by ? '（' + esc(a.rec.done_by) + '）' : '') + '</span>'
+         : '<button class="btn midbtn" data-mid="' + esc(a.mid) + '" data-cid="' + a.cid + '" data-visits="' + a.done + '" style="width:auto;padding:5px 12px;font-size:12px">面談した</button>')
+      + '</div>';
+  }
+
+  html += '<div class="card"><h3>🔴 実施どき（' + MID_TARGET + '回以上・未実施）</h3>';
+  html += nowList.length ? nowList.map(function(a) { return card(a, 'now'); }).join('') : '<div class="empty" style="padding:8px 0">対象なし</div>';
+  html += '</div>';
+  html += '<div class="card"><h3>🟡 まもなく（' + MID_NOTICE + '〜' + (MID_TARGET - 1) + '回目・準備）</h3>';
+  html += soonList.length ? soonList.map(function(a) { return card(a, 'soon'); }).join('') : '<div class="empty" style="padding:8px 0">対象なし</div>';
+  html += '</div>';
+  if (doneList.length) {
+    html += '<div class="card"><h3>✅ 実施済み</h3>' + doneList.map(function(a) { return card(a, 'done'); }).join('') + '</div>';
+  }
+  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">来店回数はキャンセルを除いた実来店の通算（同名は全店舗を通算）。'
+    + MID_NOTICE + '回目から予告表示し、' + MID_TARGET + '回目で実施対象になります。「面談した」を押すと実施済みに移り、顧客ページのカルテに残す運用と併用してください</div>';
+  app.innerHTML = html;
+
+  const who = await myStaffName();
+  app.querySelectorAll('.midbtn').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      btn.disabled = true;
+      const { error } = await sb.from('crm_mid_counseling').upsert({
+        merchant_id: btn.dataset.mid, customer_id: parseInt(btn.dataset.cid, 10),
+        done: true, done_at: new Date().toISOString(), done_by: who || '',
+        visits_at_done: parseInt(btn.dataset.visits, 10), updated_at: new Date().toISOString(),
+      });
+      if (error) { alert('保存できませんでした: ' + error.message); btn.disabled = false; return; }
+      renderMidCounseling(params);
+    });
+  });
+}
+
 // ── 体験・初回レッスン予約（広告・Lステップの流入指標） ─────
 async function renderTrial() {
   app.innerHTML = '<div class="empty">読み込み中…</div>';
@@ -2976,6 +3100,10 @@ async function render() {
   }
   if (hash.indexOf('#/report') === 0) {
     renderReport(new URLSearchParams(hash.split('?')[1] || ''));
+    return;
+  }
+  if (hash.indexOf('#/mid') === 0) {
+    renderMidCounseling(new URLSearchParams(hash.split('?')[1] || ''));
     return;
   }
   if (hash.indexOf('#/trial') === 0) { renderTrial(); return; }
