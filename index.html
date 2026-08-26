@@ -3102,17 +3102,38 @@ async function renderTrial() {
     const wk = c.filter(function(r) { const d = dOf(r); return d >= wkStart && d < wkEnd; }).length;
     const fu = c.filter(function(r) { return r.booking_start >= nowIso; }).length;
     const po = subset.filter(function(r) { return isPortal(r) && dOf(r).slice(0, 7) === ym; }).length;
+    const nextYm2 = addDays(ym + '-28', 7).slice(0, 7);
+    const nm2 = c.filter(function(r) { return dOf(r).slice(0, 7) === nextYm2; }).length;
     return '<div class="chips">'
+      + '<a style="pointer-events:none;background:var(--accent);color:#fff">🆕 これからの体験 ' + fu + '件</a>'
       + '<a style="pointer-events:none">今月 ' + tm + '件</a>'
+      + (nm2 ? '<a style="pointer-events:none;background:#5a67a5;color:#fff">翌月 ' + nm2 + '件</a>' : '')
       + '<a style="pointer-events:none">先月 ' + lm + '件</a>'
       + '<a style="pointer-events:none">今週 ' + wk + '件</a>'
-      + '<a style="pointer-events:none;background:var(--accent);color:#fff">🆕 これから ' + fu + '件</a>'
       + (po ? '<a style="pointer-events:none">🔖 かんざし 今月' + po + '件</a>' : '')
       + '</div>';
   }
   function listHtml(subset, showStore) {
     if (!subset.length) { return '<div class="empty">この店舗の体験予約はまだありません（STORESで体験受付が始まると自動で表示されます）</div>'; }
-    let out = '<div class="card">';
+    // これからの体験（未実施）を先に強調表示＝新規対応の準備がすぐ分かる
+    const future = subset.filter(function(r) { return r.booking_start >= nowIso; })
+      .sort(function(a, b) { return (a.booking_start || '').localeCompare(b.booking_start || ''); });
+    let out = '';
+    if (future.length) {
+      out += '<div class="card" style="border:2px solid var(--accent)"><h3>🆕 これから来店する体験のお客様（' + future.length + '名）</h3>';
+      future.forEach(function(r) {
+        out += '<div class="hist">'
+          + '<span class="d future">' + fmtDate(r.booking_start) + '</span>'
+          + '<span>' + fmtTime(r.booking_start) + '</span>'
+          + '<a style="flex:1;color:var(--accent);text-decoration:none;font-weight:700" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
+          + (showStore ? '<span class="badge" style="background:' + storeColor(r.store_tag) + ';font-size:10px">' + esc(r.store_tag || '') + '</span>' : '')
+          + '<span style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
+          + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖 かんざし</span>' : '')
+          + '</div>';
+      });
+      out += '</div>';
+    }
+    out += '<div class="card">';
     let curYm2 = '';
     subset.forEach(function(r) {
       const d = dOf(r);
