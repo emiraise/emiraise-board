@@ -2745,7 +2745,8 @@ async function renderStats(params) {
     if (smKeys.length > 1) {
       const tcvr = tot.trial ? Math.round(tot.conv * 100 / tot.trial) : null;
       const tqr = (tot.members + tot.quit) ? Math.round(tot.quit * 1000 / (tot.members + tot.quit)) / 10 : null;
-      html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td><td>' + tot.lessons + '</td><td>' + tot.members + '名</td><td>' + tot.susp + '名</td>'
+      let cxTot = 0; Object.keys(cxByStore).forEach(function(k2) { cxTot += cxByStore[k2]; });
+      html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td><td>' + tot.lessons + '</td><td style="color:#b3261e">' + cxTot + '</td><td>' + tot.members + '名</td><td>' + tot.susp + '名</td>'
         + '<td>' + tot.trial + '名</td><td>' + tot.conv + '名</td><td>' + (tcvr === null ? '-' : tcvr + '%') + '</td>'
         + '<td>' + tot.quit + '名</td><td>' + (tqr === null ? '-' : tqr + '%') + '</td></tr>';
     }
