@@ -2210,7 +2210,10 @@ async function renderSubs(params) {
   });
   // 店舗ごとにまとめて表示（各店舗でのチェック運用に対応）→ 店舗内は要対応順
   list.sort(function(a, b) {
-    return a.stTag.localeCompare(b.stTag) || b.sev - a.sev || b.stThis.s - a.stThis.s || (a.cu.name || '').localeCompare(b.cu.name || '');
+    // キャンセルで未消化になっている人（＝振替提案が必要）を店舗内で最優先に
+    const am = (a.c.thisCx && a.c.thisB < a.N) ? 0 : 1;
+    const bm = (b.c.thisCx && b.c.thisB < b.N) ? 0 : 1;
+    return a.stTag.localeCompare(b.stTag) || am - bm || b.sev - a.sev || b.stThis.s - a.stThis.s || (a.cu.name || '').localeCompare(b.cu.name || '');
   });
 
   const nRed = list.filter(function(x) { return x.sev >= 3; }).length;
@@ -2224,7 +2227,11 @@ async function renderSubs(params) {
     html += '<a class="' + (storeSel === stTag ? 'on' : '') + '" href="#/subs?store=' + encodeURIComponent(stTag) + '">' + esc(stTag) + '</a>';
   });
   html += '</div>';
+  const needMakeup = list.filter(function(x) { return x.c.thisCx && x.c.thisB < x.N; }).length;
+  const cxTotal = list.reduce(function(a2, x) { return a2 + (x.c.thisCx || 0); }, 0);
   html += '<div class="chips">'
+    + (needMakeup ? '<a style="pointer-events:none;background:#8f1d16;border-color:#8f1d16;color:#fff">🔁 振替提案 ' + needMakeup + '名</a>' : '')
+    + '<a style="pointer-events:none">❌ 今月のキャンセル ' + cxTotal + '回</a>'
     + '<a style="pointer-events:none;background:#b3261e;border-color:#b3261e;color:#fff">🔴 要対応 ' + nRed + '名</a>'
     + '<a style="pointer-events:none">🟡🟠 注意 ' + nYel + '名</a>'
     + '<a style="pointer-events:none">🟢 OK ' + nGrn + '名</a>'
@@ -2247,7 +2254,10 @@ async function renderSubs(params) {
     html += '<tr>'
       + '<td><a style="color:var(--accent);text-decoration:none" href="#/c/' + encodeURIComponent(x.cu.merchant_id) + '/' + x.cu.customer_id + '">' + esc(x.cu.name || '') + '</a></td>'
       + '<td>月' + x.N + '回</td>'
-      + '<td style="text-align:left">' + x.stThis.icon + ' ' + x.c.thisV + '/' + x.c.thisB + '/' + x.N + '　' + esc(x.stThis.text) + '</td>'
+      + '<td style="text-align:left">' + x.stThis.icon + ' ' + x.c.thisV + '/' + x.c.thisB + '/' + x.N + '　' + esc(x.stThis.text)
+        + ((x.c.thisCx && (x.c.thisB < x.N))
+           ? '<br><b style="color:#b3261e;font-size:11.5px">⚠️ キャンセル' + x.c.thisCx + '回で未消化' + (x.N - x.c.thisB) + '回 → 振替提案を</b>'
+           : '') + '</td>'
       + '<td style="text-align:left">' + (x.c.thisCx
           ? '<b style="color:#b3261e">' + x.c.thisCx + '回</b><small style="color:var(--sub)">（' + esc((x.c.cxDates || []).join('・')) + '）</small>'
           : '<span style="color:#ccc">—</span>') + '</td>'
