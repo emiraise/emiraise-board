@@ -2324,7 +2324,7 @@ async function renderStats(params) {
   const todayS = jstToday();
   const thisWk = weekStart(todayS);
 
-  const [res, custQ, shiftQ, trialQ] = await Promise.all([
+  const [res, custQ, shiftQ, trialQ, cxQ] = await Promise.all([
     fetchRange(first, nextFirst),
     fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,subscriptions'),
     sb.from('crm_shifts').select('staff_name,date,kind').gte('date', first).lt('date', nextFirst).limit(2000),
@@ -2333,8 +2333,18 @@ async function renderStats(params) {
       .eq('status', 'accepted')
       .or('menu.ilike.%初回%,menu.ilike.%体験%,menu.ilike.%キャンペーン%,menu.ilike.%かんざし%,customer_name.ilike.%新規%')
       .limit(1000),
+    sb.from('crm_reservations').select('store_tag,booking_start,status,customer_name')
+      .gte('booking_start', first + 'T00:00:00+09:00').lt('booking_start', nextFirst + 'T00:00:00+09:00')
+      .neq('status', 'accepted').limit(1000),
   ]);
   if (res.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(res.error.message) + '</div>'; return; }
+  // 店舗別のキャンセル数（実施レッスンとの整合性表示用）
+  const cxByStore = {};
+  ((cxQ && cxQ.data) || []).forEach(function(r) {
+    if (INTERNAL_NAME_RE.test(r.customer_name || '')) return;
+    const st = r.store_tag || '店舗不明';
+    cxByStore[st] = (cxByStore[st] || 0) + 1;
+  });
   const rows = res.data || [];
   const custs = custQ.data || [];
   const monthShifts = shiftQ.data || [];
