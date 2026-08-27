@@ -552,6 +552,19 @@ async function renderCustomer(mid, cid) {
   const staffPool = staffSet((poolRes && poolRes.data) || []);
 
   // 名寄せ: 他店舗に同じお客様（電話番号一致・なければ氏名一致）がいれば履歴・カルテを統合
+  // 同名検索は候補待ちが不要なので、ここで先に走らせておく（待ち時間の短縮・2026-09-01）
+  let sameNamePromise = null;
+  if (c && c.name) {
+    const baseName0 = c.name;
+    const compact0 = nw(baseName0);
+    const variants0 = [baseName0, compact0];
+    const mm = baseName0.match(/^(\S+)[\s　]+(\S+)$/);
+    if (mm) { variants0.push(mm[1] + ' ' + mm[2]); variants0.push(mm[1] + '　' + mm[2]); }
+    const uniq0 = variants0.filter(function(v, i2) { return v && variants0.indexOf(v) === i2; });
+    sameNamePromise = sb.from('crm_reservations').select('*')
+      .in('customer_name', uniq0).eq('status', 'accepted')
+      .order('booking_start', { ascending: false }).limit(200);
+  }
   let linked = [];
   if (c && (c.phone || c.name)) {
     let lq = sb.from('crm_customers').select('merchant_id,customer_id,merchant_name,name,phone');
@@ -583,9 +596,8 @@ async function renderCustomer(mid, cid) {
       const m2 = baseName.match(/^(\S+)[\s　]+(\S+)$/);
       if (m2) { variants.push(m2[1] + ' ' + m2[2]); variants.push(m2[1] + '　' + m2[2]); }
       const uniqV = variants.filter(function(v, i2) { return v && variants.indexOf(v) === i2; });
-      const { data: sameName } = await sb.from('crm_reservations').select('*')
-        .in('customer_name', uniqV).eq('status', 'accepted')  // キャンセルは回数に数えない（2026-08-17修正）
-        .order('booking_start', { ascending: false }).limit(200);
+      const sameNameRes = sameNamePromise ? await sameNamePromise : { data: [] };
+      const sameName = sameNameRes.data || [];
       const seenIds = {};
       const seenSlots = {};  // 同じ日時・同じ店舗は1件だけ（ワンモア/STORES二重登録の除去）
       hist.forEach(function(r) {
@@ -1136,6 +1148,17 @@ async function toggleCheck(r, isChecked) {
 const BODY_TAGS = ['腰', '膝', '肩', '首', '妊娠中', '産後', '高血圧', '手術歴あり'];
 const GOAL_TAGS = ['姿勢改善', '腰痛改善', '肩こり改善', 'ダイエット', '体力づくり', '産後回復', '競技力向上', 'リラックス'];
 function custKey(mid, cid) { return mid + '|' + cid; }
+// 短時間キャッシュ（60秒）: タブや日付を行き来しても同じデータを取り直さない（2026-09-01高速化）
+const _qCache = {};
+function cached(key, fn) {
+  const hit = _qCache[key];
+  const now = Date.now();
+  if (hit && now - hit.t < 60000) return hit.p;
+  const p = fn();
+  _qCache[key] = { t: now, p: p };
+  return p;
+}
+
 async function fetchCustMeta(rows) {
   const ids = [];
   const seen = {};
@@ -1215,9 +1238,11 @@ function ticketAlerts(ticketBooks) {
 
 // ── シフト（Googleドライブのシフト表から取り込み済みデータ） ──
 async function fetchShifts(fromDate, toDateExcl) {
-  const { data } = await sb.from('crm_shifts').select('*')
-    .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
-  return data || [];
+  return cached('sh|' + fromDate + '|' + toDateExcl, async function() {
+    const { data } = await sb.from('crm_shifts').select('*')
+      .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
+    return data || [];
+  });
 }
 let SHIFT_CODES = null;
 async function shiftCodes() {
@@ -1697,16 +1722,16 @@ async function renderTimeline(params) {
   app.innerHTML = '<div class="empty">読み込み中…</div>';
 
   if (mode === 'day') {
-    const { data, error } = await fetchRange(date, addDays(date, 1));
+    // 8種類のデータを並列取得（従来は1つずつ順番に待っていたため遅かった・2026-09-01高速化）
+    const d1 = addDays(date, 1);
+    const [resQ0, dayChecks, dayBlocks, dayShifts, codes, dayCal, dayAvail, dayStBlocks] = await Promise.all([
+      fetchRange(date, d1), fetchChecks(date, d1), fetchBlocks(date, d1),
+      fetchShifts(date, d1), shiftCodes(), fetchCalEvents(date, d1),
+      fetchAvail(date, d1), fetchStoresBlocks(date, d1),
+    ]);
+    const data = resQ0.data, error = resQ0.error;
     if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
-    const dayChecks = await fetchChecks(date, addDays(date, 1));
-    const dayBlocks = await fetchBlocks(date, addDays(date, 1));
     const dayMeta = await fetchCustMeta(data);
-    const dayShifts = await fetchShifts(date, addDays(date, 1));
-    const codes = await shiftCodes();
-    const dayCal = await fetchCalEvents(date, addDays(date, 1));
-    const dayAvail = await fetchAvail(date, addDays(date, 1));
-    const dayStBlocks = await fetchStoresBlocks(date, addDays(date, 1));
     const storeSel = params.get('store') || '';
     const stores = {};
     data.forEach(function(r) { if (r.store_tag) stores[r.store_tag] = true; });
