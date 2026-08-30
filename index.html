@@ -3114,24 +3114,32 @@ async function renderMidCounseling(params) {
 // STORESの予約フォームには「どこで知りましたか」の質問が無いため、
 //   ①STORESの顧客「流入経路」欄 ②顧客項目の回答 ③LINE連携の有無 ④メモの記述
 // から自動推定し、確定できないものはスタッフが画面のプルダウンで指定する。
-const LEAD_SOURCES = ['紹介', 'LINE', 'Instagram', '検索', 'HPB', 'かんざし', 'チラシ・看板', 'その他'];
+// 分類は「新規継続率測定シート」の入力ルールタブと
+// カウンセリングシート「エミライズを何で知りましたか？」の選択肢に合わせる
+const LEAD_SOURCES = ['紹介', '紹介CP', 'インスタ', '検索', 'ホットペッパー', '公式LINE', 'チラシ', 'その他'];
 const LEAD_STYLE = {
-  '紹介': '#b04a4a', 'LINE': '#4a8f4a', 'Instagram': '#a5478d', '検索': '#2f6f9f',
-  'HPB': '#c07a2a', 'かんざし': '#8a6a3a', 'チラシ・看板': '#6a6a6a', 'その他': '#7a7a7a',
-  '未設定': '#9a9a9a'
+  '紹介': '#b04a4a', '紹介CP': '#8f3a6a', 'インスタ': '#a5478d', '検索': '#2f6f9f',
+  'ホットペッパー': '#c07a2a', '公式LINE': '#4a8f4a', 'チラシ': '#6a6a6a',
+  'かんざし': '#8a6a3a', 'その他': '#7a7a7a', '未設定': '#9a9a9a'
 };
 // 表記ゆれをタブの分類名に寄せる（例:「インスタグラム」→ Instagram）
 function normSource(v) {
   const t = String(v || '').trim();
   if (!t) return '';
-  if (/紹介|口コミ|知人|友人|家族|お客様から/i.test(t)) return '紹介';
-  if (/line|ライン|Lステップ|lステップ/i.test(t)) return 'LINE';
-  if (/insta|インスタ|IG|ig/i.test(t)) return 'Instagram';
+  if (/CP|ＣＰ/.test(t) && /紹介/.test(t)) return '紹介CP';
+  if (/紹介|口コミ|知人|友人|家族/.test(t)) return '紹介';
+  if (/line|ライン|Lステップ|lステップ|ＬＩＮＥ/i.test(t)) return '公式LINE';
+  if (/insta|インスタ/i.test(t)) return 'インスタ';
+  if (/hpb|ホットペッパー|ホッペ/i.test(t)) return 'ホットペッパー';
   if (/検索|google|グーグル|ググ|web|ホームページ|HP|ネット/i.test(t)) return '検索';
-  if (/hpb|ホットペッパー|ホッペ/i.test(t)) return 'HPB';
   if (/かんざし/i.test(t)) return 'かんざし';
-  if (/チラシ|看板|ポスティング|折込|のぼり/i.test(t)) return 'チラシ・看板';
+  if (/チラシ|看板|ポスティング|折込|のぼり/i.test(t)) return 'チラシ';
   return LEAD_SOURCES.indexOf(t) >= 0 ? t : 'その他';
+}
+// 氏名の表記ゆれを吸収（全角半角・空白・「（モニター）」等の注記を除去）
+function nameKey(s) {
+  return String(s || '').normalize('NFKC')
+    .replace(/[（(][^）)]*[）)]/g, '').replace(/[\s\u3000]/g, '').toLowerCase();
 }
 // 顧客項目（プロフィール項目）から経路っぽい設問の回答を拾う
 function sourceFromProfile(c) {
@@ -3143,9 +3151,15 @@ function sourceFromProfile(c) {
   return '';
 }
 // 経路を決める。manual（手入力）が常に最優先。戻り値の auto=推定かどうか
-function leadSourceOf(r, cust, manual, isPortalRow) {
+function leadSourceOf(r, cust, manual, isPortalRow, byName) {
   const key = (r.merchant_id || '') + '|' + r.customer_id;
   if (manual && manual[key]) return { src: normSource(manual[key]), auto: false };
+  // 継続率測定シート／カウンセリング回答に本人の申告があればそれが正
+  if (byName) {
+    const nk = nameKey(r.customer_name);
+    const rec = byName[nk + '|' + (r.store_tag || '')] || byName[nk];
+    if (rec) return { src: normSource(rec.source), auto: false, from: rec.origin };
+  }
   if (isPortalRow) return { src: 'かんざし', auto: true };
   const c = cust && cust[key];
   if (c) {
@@ -3162,8 +3176,11 @@ function leadSourceOf(r, cust, manual, isPortalRow) {
 function leadBadge(v) {
   const bg = LEAD_STYLE[v.src] || LEAD_STYLE['未設定'];
   const label = esc(v.src) + (v.auto && v.src !== '未設定' ? '?' : '');
-  return '<span class="badge" style="background:' + bg + ';font-size:10px" title="'
-    + (v.auto ? 'STORESのデータからの推定（プルダウンで確定できます）' : 'スタッフが指定した経路') + '">'
+  const why = v.auto ? 'STORESのデータからの推定（プルダウンで確定できます）'
+    : v.from === 'form' ? 'カウンセリングシートのご本人の回答'
+    : v.from === 'sheet' ? '新規継続率測定シートの記入'
+    : 'スタッフがこの画面で指定した経路';
+  return '<span class="badge" style="background:' + bg + ';font-size:10px" title="' + why + '">'
     + label + '</span>';
 }
 
@@ -3187,20 +3204,27 @@ async function renderTrial() {
   rows.forEach(function(r) {
     if (r.customer_id && !seenId[r.customer_id]) { seenId[r.customer_id] = true; needIds.push(r.customer_id); }
   });
-  const [custQ, srcQ] = await Promise.all([
+  const [custQ, srcQ, nameQ] = await Promise.all([
     needIds.length
       ? sb.from('crm_customers').select('merchant_id,customer_id,channel,line_linked,profile_fields,memo')
           .in('customer_id', needIds.slice(0, 900))
       : Promise.resolve({ data: [], error: null }),
     sb.from('crm_lead_sources').select('merchant_id,customer_id,source').limit(2000),
+    fetchTable('crm_lead_source_names', 'name_key,store,source,origin'),
   ]);
+  // 測定シート／カウンセリング回答の経路（氏名キー）。店舗つきを優先して引く
+  const srcByName = {};
+  ((nameQ && nameQ.data) || []).forEach(function(x) {
+    srcByName[x.name_key + '|' + (x.store || '')] = x;
+    if (!srcByName[x.name_key] || x.origin === 'form') srcByName[x.name_key] = x;
+  });
   const custBy = {};
   ((custQ && custQ.data) || []).forEach(function(c) { custBy[(c.merchant_id || '') + '|' + c.customer_id] = c; });
   const manualSrc = {};
   ((srcQ && srcQ.data) || []).forEach(function(x) { manualSrc[(x.merchant_id || '') + '|' + x.customer_id] = x.source; });
   const selSrc = decodeURIComponent((location.hash.split('/')[3] || ''));
   function isPortal(r) { return (r.menu || '').indexOf('かんざし') >= 0; }
-  function srcOf(r) { return leadSourceOf(r, custBy, manualSrc, isPortal(r)); }
+  function srcOf(r) { return leadSourceOf(r, custBy, manualSrc, isPortal(r), srcByName); }
   function srcSelect(r) {
     const v = srcOf(r);
     let o = '<select class="lsrc" data-mid="' + esc(r.merchant_id || '') + '" data-cid="' + r.customer_id + '">';
@@ -3323,7 +3347,7 @@ async function renderTrial() {
   const subset = selSrc ? byStore.filter(function(r) { return srcOf(r).src === selSrc; }) : byStore;
   html += listHtml(subset, !selStore);
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の確定予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
-  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">経路の「?」付きはSTORESのデータからの推定です。各行のプルダウンで選ぶと確定として保存され、次回からその経路で集計されます</div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">経路は「新規継続率測定シート」とカウンセリングシートの「エミライズを何で知りましたか？」から自動反映しています。「?」付きはSTORESのデータからの推定なので、各行のプルダウンで選ぶと確定として保存されます</div>';
   app.innerHTML = html;
 
   const who = await myStaffName();
