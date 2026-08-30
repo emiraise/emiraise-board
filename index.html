@@ -43,11 +43,12 @@
   .hist .d { min-width:104px; font-variant-numeric:tabular-nums; }
   .hist .future { color:var(--accent); font-weight:700; }
   .hist .seq { min-width:44px; font-weight:800; color:var(--accent); font-variant-numeric:tabular-nums; }
-  /* 体験タブの行。名前とスタッフの2列を伸縮させることで、
-     店舗と経路が画面のほぼ中央に並ぶ（右端に寄って読みにくいのを解消） */
+  /* 体験タブの行。列幅を固定し、左端から一直線にそろえる
+     （伸縮させると行ごとに位置がずれて読みにくいため） */
   .trow { display:grid; align-items:center; gap:10px; padding:9px 2px;
           border-bottom:1px solid var(--line); font-size:13px;
-          grid-template-columns:104px 52px minmax(7em,1fr) 92px 96px 96px minmax(4em,1fr) auto; }
+          justify-content:start;
+          grid-template-columns:104px 52px 12em 96px 106px 104px 7em auto; }
   .trow > * { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .trow .d { font-variant-numeric:tabular-nums; }
   .trow .future { color:var(--accent); font-weight:700; }
