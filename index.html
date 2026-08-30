@@ -3183,6 +3183,7 @@ function leadBadge(v) {
   const why = v.auto ? 'STORESのデータからの推定（プルダウンで確定できます）'
     : v.from === 'form' ? 'カウンセリングシートのご本人の回答'
     : v.from === 'sheet' ? '新規継続率測定シートの記入'
+    : v.from === 'alias' ? 'シート側の氏名が1文字違いのため、同一のお客様として照合したもの'
     : 'スタッフがこの画面で指定した経路';
   return '<span class="badge" style="background:' + bg + ';font-size:10px" title="' + why + '">'
     + label + '</span>';
