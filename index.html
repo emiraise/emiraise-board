@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
+.lsrc{font-size:10px;padding:1px 2px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--sub);max-width:88px}
   :root { --accent:#1f6f54; --accent-d:#12463a; --bg:#f2f5f3; --card:#fff; --line:#e1e7e3; --text:#182722; --sub:#68796f; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:"Noto Sans JP",-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; }
@@ -3109,6 +3110,63 @@ async function renderMidCounseling(params) {
 }
 
 // ── 体験・初回レッスン予約（広告・Lステップの流入指標） ─────
+// ── 流入経路（どこで知って予約に至ったか） ─────────────────
+// STORESの予約フォームには「どこで知りましたか」の質問が無いため、
+//   ①STORESの顧客「流入経路」欄 ②顧客項目の回答 ③LINE連携の有無 ④メモの記述
+// から自動推定し、確定できないものはスタッフが画面のプルダウンで指定する。
+const LEAD_SOURCES = ['紹介', 'LINE', 'Instagram', '検索', 'HPB', 'かんざし', 'チラシ・看板', 'その他'];
+const LEAD_STYLE = {
+  '紹介': '#b04a4a', 'LINE': '#4a8f4a', 'Instagram': '#a5478d', '検索': '#2f6f9f',
+  'HPB': '#c07a2a', 'かんざし': '#8a6a3a', 'チラシ・看板': '#6a6a6a', 'その他': '#7a7a7a',
+  '未設定': '#9a9a9a'
+};
+// 表記ゆれをタブの分類名に寄せる（例:「インスタグラム」→ Instagram）
+function normSource(v) {
+  const t = String(v || '').trim();
+  if (!t) return '';
+  if (/紹介|口コミ|知人|友人|家族|お客様から/i.test(t)) return '紹介';
+  if (/line|ライン|Lステップ|lステップ/i.test(t)) return 'LINE';
+  if (/insta|インスタ|IG|ig/i.test(t)) return 'Instagram';
+  if (/検索|google|グーグル|ググ|web|ホームページ|HP|ネット/i.test(t)) return '検索';
+  if (/hpb|ホットペッパー|ホッペ/i.test(t)) return 'HPB';
+  if (/かんざし/i.test(t)) return 'かんざし';
+  if (/チラシ|看板|ポスティング|折込|のぼり/i.test(t)) return 'チラシ・看板';
+  return LEAD_SOURCES.indexOf(t) >= 0 ? t : 'その他';
+}
+// 顧客項目（プロフィール項目）から経路っぽい設問の回答を拾う
+function sourceFromProfile(c) {
+  const fs = (c && c.profile_fields) || [];
+  for (let i = 0; i < fs.length; i++) {
+    const q = String(fs[i].question || '');
+    if (/知|きっかけ|経路|どこで|媒体/.test(q) && fs[i].answer) return String(fs[i].answer);
+  }
+  return '';
+}
+// 経路を決める。manual（手入力）が常に最優先。戻り値の auto=推定かどうか
+function leadSourceOf(r, cust, manual, isPortalRow) {
+  const key = (r.merchant_id || '') + '|' + r.customer_id;
+  if (manual && manual[key]) return { src: normSource(manual[key]), auto: false };
+  if (isPortalRow) return { src: 'かんざし', auto: true };
+  const c = cust && cust[key];
+  if (c) {
+    if (c.channel) return { src: normSource(c.channel), auto: true };
+    const pf = sourceFromProfile(c);
+    if (pf) return { src: normSource(pf), auto: true };
+    const m = String(c.memo || '');
+    const head = m.slice(0, 400);
+    if (/紹介|知人|友人|同級生|ご家族/.test(head)) return { src: '紹介', auto: true };
+    if (c.line_linked) return { src: 'LINE', auto: true };
+  }
+  return { src: '未設定', auto: true };
+}
+function leadBadge(v) {
+  const bg = LEAD_STYLE[v.src] || LEAD_STYLE['未設定'];
+  const label = esc(v.src) + (v.auto && v.src !== '未設定' ? '?' : '');
+  return '<span class="badge" style="background:' + bg + ';font-size:10px" title="'
+    + (v.auto ? 'STORESのデータからの推定（プルダウンで確定できます）' : 'スタッフが指定した経路') + '">'
+    + label + '</span>';
+}
+
 async function renderTrial() {
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const selStore = decodeURIComponent((location.hash.split('/')[2] || ''));
@@ -3122,7 +3180,36 @@ async function renderTrial() {
     .order('booking_start', { ascending: false }).limit(500);
   if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
   const rows = data || [];
+  // 経路の判定材料（顧客のSTORES情報）と、スタッフが指定した確定経路
+  // メモは1件が数KBあるため、体験リストに出てくる顧客だけに絞って取得する（表示を軽く保つ）
+  const needIds = [];
+  const seenId = {};
+  rows.forEach(function(r) {
+    if (r.customer_id && !seenId[r.customer_id]) { seenId[r.customer_id] = true; needIds.push(r.customer_id); }
+  });
+  const [custQ, srcQ] = await Promise.all([
+    needIds.length
+      ? sb.from('crm_customers').select('merchant_id,customer_id,channel,line_linked,profile_fields,memo')
+          .in('customer_id', needIds.slice(0, 900))
+      : Promise.resolve({ data: [], error: null }),
+    sb.from('crm_lead_sources').select('merchant_id,customer_id,source').limit(2000),
+  ]);
+  const custBy = {};
+  ((custQ && custQ.data) || []).forEach(function(c) { custBy[(c.merchant_id || '') + '|' + c.customer_id] = c; });
+  const manualSrc = {};
+  ((srcQ && srcQ.data) || []).forEach(function(x) { manualSrc[(x.merchant_id || '') + '|' + x.customer_id] = x.source; });
+  const selSrc = decodeURIComponent((location.hash.split('/')[3] || ''));
   function isPortal(r) { return (r.menu || '').indexOf('かんざし') >= 0; }
+  function srcOf(r) { return leadSourceOf(r, custBy, manualSrc, isPortal(r)); }
+  function srcSelect(r) {
+    const v = srcOf(r);
+    let o = '<select class="lsrc" data-mid="' + esc(r.merchant_id || '') + '" data-cid="' + r.customer_id + '">';
+    o += '<option value=""' + (v.auto ? ' selected' : '') + '>経路?</option>';
+    LEAD_SOURCES.forEach(function(k) {
+      o += '<option value="' + esc(k) + '"' + (!v.auto && v.src === k ? ' selected' : '') + '>' + esc(k) + '</option>';
+    });
+    return o + '</select>';
+  }
   const nowIso = new Date().toISOString();
   const ym = today.slice(0, 7);
   const lastYm = addDays(ym + '-01', -1).slice(0, 7);
@@ -3146,7 +3233,27 @@ async function renderTrial() {
       + '<a style="pointer-events:none">先月 ' + lm + '件</a>'
       + '<a style="pointer-events:none">今週 ' + wk + '件</a>'
       + (po ? '<a style="pointer-events:none">🔖 かんざし 今月' + po + '件</a>' : '')
-      + '</div>';
+      + '</div>' + srcChips(subset);
+  }
+  // 経路別の内訳（今月／全期間）。クリックでその経路だけに絞り込む
+  function srcChips(subset) {
+    const tally = {}, tallyM = {};
+    subset.forEach(function(r) {
+      const k = srcOf(r).src;
+      tally[k] = (tally[k] || 0) + 1;
+      if (dOf(r).slice(0, 7) === ym) tallyM[k] = (tallyM[k] || 0) + 1;
+    });
+    const order = LEAD_SOURCES.concat(['未設定']).filter(function(k) { return tally[k]; });
+    if (!order.length) return '';
+    const base = '#/trial' + (selStore ? '/' + encodeURIComponent(selStore) : '/');
+    let o = '<div class="chips" style="margin-top:2px">'
+      + '<a href="' + base + '"' + (!selSrc ? ' class="on"' : '') + '>経路すべて ' + subset.length + '</a>';
+    order.forEach(function(k) {
+      o += '<a href="' + base + '/' + encodeURIComponent(k) + '"' + (selSrc === k ? ' class="on"' : '')
+        + ' style="border-left:4px solid ' + (LEAD_STYLE[k] || LEAD_STYLE['未設定']) + '">'
+        + esc(k) + ' ' + tally[k] + (tallyM[k] ? '<span style="color:var(--sub)">（今月' + tallyM[k] + '）</span>' : '') + '</a>';
+    });
+    return o + '</div>';
   }
   function listHtml(subset, showStore) {
     if (!subset.length) { return '<div class="empty">この店舗の体験予約はまだありません（STORESで体験受付が始まると自動で表示されます）</div>'; }
@@ -3163,6 +3270,7 @@ async function renderTrial() {
           + '<a style="flex:1;color:var(--accent);text-decoration:none;font-weight:700" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
           + (showStore ? '<span class="badge" style="background:' + storeColor(r.store_tag) + ';font-size:10px">' + esc(r.store_tag || '') + '</span>' : '')
           + '<span style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
+          + leadBadge(srcOf(r)) + srcSelect(r)
           + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖 かんざし</span>' : '')
           + '</div>';
       });
@@ -3184,6 +3292,7 @@ async function renderTrial() {
         + '<a style="flex:1;color:var(--accent);text-decoration:none;font-weight:700" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
         + (showStore ? '<span class="badge" style="background:' + storeColor(r.store_tag) + ';font-size:10px">' + esc(r.store_tag || '') + '</span>' : '')
         + '<span style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
+        + leadBadge(srcOf(r)) + srcSelect(r)
         + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖 かんざし</span>' : '')
         + (future ? '<span class="pill">🆕 予定</span>' : '<span class="pill" style="background:#dde6e0">来店済</span>')
         + '</div>';
@@ -3202,17 +3311,45 @@ async function renderTrial() {
 
   let html = '<h2>🎫 体験・初回レッスン予約（広告/Lステップ流入の指標）</h2>';
   html += '<div class="chips">';
-  html += '<a href="#/trial"' + (!selStore ? ' class="on"' : '') + '>全店舗 ' + rows.length + '</a>';
+  html += '<a href="#/trial' + (selSrc ? '//' + encodeURIComponent(selSrc) : '') + '"' + (!selStore ? ' class="on"' : '') + '>全店舗 ' + rows.length + '</a>';
   keys.forEach(function(k) {
-    html += '<a href="#/trial/' + encodeURIComponent(k) + '"' + (selStore === k ? ' class="on"' : '') + '>' + esc(k) + ' ' + stores[k].length + '</a>';
+    const sfx = selSrc ? '/' + encodeURIComponent(selSrc) : '';
+    html += '<a href="#/trial/' + encodeURIComponent(k) + sfx + '"' + (selStore === k ? ' class="on"' : '') + '>' + esc(k) + ' ' + stores[k].length + '</a>';
   });
   html += '</div>';
 
-  const subset = selStore ? (stores[selStore] || []) : rows;
-  html += statChips(subset);
+  const byStore = selStore ? (stores[selStore] || []) : rows;
+  html += statChips(byStore);
+  const subset = selSrc ? byStore.filter(function(r) { return srcOf(r).src === selSrc; }) : byStore;
   html += listHtml(subset, !selStore);
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の確定予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">経路の「?」付きはSTORESのデータからの推定です。各行のプルダウンで選ぶと確定として保存され、次回からその経路で集計されます</div>';
   app.innerHTML = html;
+
+  const who = await myStaffName();
+  app.querySelectorAll('.lsrc').forEach(function(sel) {
+    sel.addEventListener('change', async function() {
+      const mid = sel.dataset.mid, cid = parseInt(sel.dataset.cid, 10);
+      let error = null;
+      if (!sel.value) {
+        // 「経路?」に戻す＝手入力を取り消して自動推定へ戻す
+        const r = await sb.from('crm_lead_sources').delete().eq('merchant_id', mid).eq('customer_id', cid);
+        error = r.error;
+      } else {
+        const r = await sb.from('crm_lead_sources').upsert({
+          merchant_id: mid, customer_id: cid, source: sel.value,
+          updated_by: who || '', updated_at: new Date().toISOString()
+        });
+        error = r.error;
+      }
+      sel.style.boxShadow = error ? '0 0 0 2px #b3261e' : '0 0 0 2px #4a8f6e';
+      setTimeout(function() { sel.style.boxShadow = ''; }, 1200);
+      if (error) { alert('保存できませんでした: ' + error.message); return; }
+      const key = mid + '|' + cid;
+      if (sel.value) manualSrc[key] = sel.value; else delete manualSrc[key];
+      renderTrial();
+    });
+  });
 }
 
 
