@@ -3117,10 +3117,12 @@ async function renderMidCounseling(params) {
 // 分類は「新規継続率測定シート」の入力ルールタブと
 // カウンセリングシート「エミライズを何で知りましたか？」の選択肢に合わせる
 const LEAD_SOURCES = ['紹介', '紹介CP', 'インスタ', '検索', 'ホットペッパー', '公式LINE', 'チラシ', 'その他'];
+// 店舗バッジ（STORE_COLOR_MAP）と並ぶため、店舗色とも経路どうしとも
+// 見分けがつく色を選んである（CIE-Lab距離26以上）。安易に変えないこと
 const LEAD_STYLE = {
-  '紹介': '#b04a4a', '紹介CP': '#8f3a6a', 'インスタ': '#a5478d', '検索': '#2f6f9f',
-  'ホットペッパー': '#c07a2a', '公式LINE': '#4a8f4a', 'チラシ': '#6a6a6a',
-  'かんざし': '#8a6a3a', 'その他': '#7a7a7a', '未設定': '#9a9a9a'
+  '紹介': '#009959', '紹介CP': '#8a00a5', 'インスタ': '#a5006e', '検索': '#2986a5',
+  'ホットペッパー': '#a50000', '公式LINE': '#0c9900', 'チラシ': '#8c8383',
+  'かんざし': '#6a7f00', 'その他': '#6f6f6f', '未設定': '#adadad'
 };
 // 表記ゆれをタブの分類名に寄せる（例:「インスタグラム」→ Instagram）
 function normSource(v) {
@@ -3139,7 +3141,9 @@ function normSource(v) {
 // 氏名の表記ゆれを吸収（全角半角・空白・「（モニター）」等の注記を除去）
 function nameKey(s) {
   return String(s || '').normalize('NFKC')
-    .replace(/[（(][^）)]*[）)]/g, '').replace(/[\s\u3000]/g, '').toLowerCase();
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .replace(/^[\s\u3000]*(新規|体験|初回)[\s\u3000]*/, '')  // 予約名の目印を落とす
+    .replace(/[\s\u3000]/g, '').toLowerCase();
 }
 // 顧客項目（プロフィール項目）から経路っぽい設問の回答を拾う
 function sourceFromProfile(c) {
