@@ -43,6 +43,18 @@
   .hist .d { min-width:104px; font-variant-numeric:tabular-nums; }
   .hist .future { color:var(--accent); font-weight:700; }
   .hist .seq { min-width:44px; font-weight:800; color:var(--accent); font-variant-numeric:tabular-nums; }
+  /* 体験タブの行。名前とスタッフの2列を伸縮させることで、
+     店舗と経路が画面のほぼ中央に並ぶ（右端に寄って読みにくいのを解消） */
+  .trow { display:grid; align-items:center; gap:10px; padding:9px 2px;
+          border-bottom:1px solid var(--line); font-size:13px;
+          grid-template-columns:104px 52px minmax(7em,1fr) 92px 96px 96px minmax(4em,1fr) auto; }
+  .trow > * { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .trow .d { font-variant-numeric:tabular-nums; }
+  .trow .future { color:var(--accent); font-weight:700; }
+  @media (max-width:860px) {
+    .trow { grid-template-columns:88px 46px 1fr auto; row-gap:4px; }
+    .trow > .tstaff { grid-column:1 / -1; color:var(--sub); }
+  }
   .mhead { font-weight:800; font-size:13px; margin:12px 0 4px; padding:6px 10px; border-radius:10px; background:#dde6e0; color:#26443a; }
   .mhead.warn { background:#f4dede; color:#b3261e; }
   .note { border-bottom:1px solid var(--line); padding:10px 2px; }
@@ -3230,6 +3242,12 @@ async function renderTrial() {
   const selSrc = decodeURIComponent((location.hash.split('/')[3] || ''));
   function isPortal(r) { return (r.menu || '').indexOf('かんざし') >= 0; }
   function srcOf(r) { return leadSourceOf(r, custBy, manualSrc, isPortal(r), srcByName); }
+  // 店舗タブ選択中は店舗名を出さないが、列がずれないよう枠だけ残す
+  function storeCell(r, showStore) {
+    if (!showStore) return '<span></span>';
+    return '<span class="badge" style="background:' + storeColor(r.store_tag)
+      + ';font-size:10px">' + esc(r.store_tag || '') + '</span>';
+  }
   function srcSelect(r) {
     const v = srcOf(r);
     let o = '<select class="lsrc" data-mid="' + esc(r.merchant_id || '') + '" data-cid="' + r.customer_id + '">';
@@ -3251,7 +3269,7 @@ async function renderTrial() {
     const tm = c.filter(function(r) { return dOf(r).slice(0, 7) === ym; }).length;
     const lm = c.filter(function(r) { return dOf(r).slice(0, 7) === lastYm; }).length;
     const wk = c.filter(function(r) { const d = dOf(r); return d >= wkStart && d < wkEnd; }).length;
-    const fu = c.filter(function(r) { return r.booking_start >= nowIso; }).length;
+    const fu = subset.filter(function(r) { return r.booking_start >= nowIso; }).length;  // 下の一覧と件数を揃える
     const po = subset.filter(function(r) { return isPortal(r) && dOf(r).slice(0, 7) === ym; }).length;
     const nextYm2 = addDays(ym + '-28', 7).slice(0, 7);
     const nm2 = c.filter(function(r) { return dOf(r).slice(0, 7) === nextYm2; }).length;
@@ -3293,14 +3311,13 @@ async function renderTrial() {
     if (future.length) {
       out += '<div class="card" style="border:2px solid var(--accent)"><h3>🆕 これから来店する体験のお客様（' + future.length + '名）</h3>';
       future.forEach(function(r) {
-        out += '<div class="hist">'
+        out += '<div class="trow">'
           + '<span class="d future">' + fmtDate(r.booking_start) + '</span>'
           + '<span>' + fmtTime(r.booking_start) + '</span>'
-          + '<a style="flex:1;color:var(--accent);text-decoration:none;font-weight:700" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
-          + (showStore ? '<span class="badge" style="background:' + storeColor(r.store_tag) + ';font-size:10px">' + esc(r.store_tag || '') + '</span>' : '')
-          + '<span style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
-          + leadBadge(srcOf(r)) + srcSelect(r)
-          + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖 かんざし</span>' : '')
+          + '<a style="color:var(--accent);text-decoration:none;font-weight:700" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
+          + storeCell(r, showStore) + leadBadge(srcOf(r)) + srcSelect(r)
+          + '<span class="tstaff" style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
+          + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖 かんざし</span>' : '<span></span>')
           + '</div>';
       });
       out += '</div>';
@@ -3315,15 +3332,14 @@ async function renderTrial() {
         out += '<div class="mhead">' + parseInt(curYm2.slice(0, 5), 10) + '年' + parseInt(curYm2.slice(5, 7), 10) + '月　' + mc + '件</div>';
       }
       const future = r.booking_start >= nowIso;
-      out += '<div class="hist">'
+      out += '<div class="trow">'
         + '<span class="d' + (future ? ' future' : '') + '">' + fmtDate(r.booking_start) + '</span>'
         + '<span>' + fmtTime(r.booking_start) + '</span>'
-        + '<a style="flex:1;color:var(--accent);text-decoration:none;font-weight:700" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
-        + (showStore ? '<span class="badge" style="background:' + storeColor(r.store_tag) + ';font-size:10px">' + esc(r.store_tag || '') + '</span>' : '')
-        + '<span style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
-        + leadBadge(srcOf(r)) + srcSelect(r)
-        + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖 かんざし</span>' : '')
-        + (future ? '<span class="pill">🆕 予定</span>' : '<span class="pill" style="background:#dde6e0">来店済</span>')
+        + '<a style="color:var(--accent);text-decoration:none;font-weight:700" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
+        + storeCell(r, showStore) + leadBadge(srcOf(r)) + srcSelect(r)
+        + '<span class="tstaff" style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
+        + '<span>' + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖</span> ' : '')
+        + (future ? '<span class="pill">🆕 予定</span>' : '<span class="pill" style="background:#dde6e0">来店済</span>') + '</span>'
         + '</div>';
     });
     return out + '</div>';
