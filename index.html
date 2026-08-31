@@ -3210,9 +3210,9 @@ async function renderTrial() {
   const to = addDays(today, 92);
   const { data, error } = await sb.from('crm_reservations').select('*')
     .gte('booking_start', from + 'T00:00:00+09:00').lt('booking_start', to + 'T00:00:00+09:00')
-    .eq('status', 'accepted')
+    .in('status', ['accepted', 'canceled_by_host', 'canceled_by_customer'])
     .or('menu.ilike.%初回%,menu.ilike.%体験%,menu.ilike.%キャンペーン%,menu.ilike.%かんざし%,customer_name.ilike.%新規%,customer_name.ilike.%体験%')
-    .order('booking_start', { ascending: false }).limit(500);
+    .order('booking_start', { ascending: false }).limit(700);
   if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
   const rows = data || [];
   // 経路の判定材料（顧客のSTORES情報）と、スタッフが指定した確定経路
@@ -3222,14 +3222,18 @@ async function renderTrial() {
   rows.forEach(function(r) {
     if (r.customer_id && !seenId[r.customer_id]) { seenId[r.customer_id] = true; needIds.push(r.customer_id); }
   });
-  const [custQ, srcQ, nameQ] = await Promise.all([
+  const [custQ, srcQ, nameQ, outQ] = await Promise.all([
     needIds.length
       ? sb.from('crm_customers').select('merchant_id,customer_id,channel,line_linked,profile_fields,memo')
           .in('customer_id', needIds.slice(0, 900))
       : Promise.resolve({ data: [], error: null }),
     sb.from('crm_lead_sources').select('merchant_id,customer_id,source').limit(2000),
     fetchTable('crm_lead_source_names', 'name_key,store,source,origin'),
+    fetchTable('v_trial_outcomes', 'name_key,trial_date,next_date,after_count,had_visit,had_cancel'),
   ]);
+  // 体験のその後（体験より後の日に予約が入っていれば成約とみなす）
+  const outcome = {};
+  ((outQ && outQ.data) || []).forEach(function(x) { outcome[x.name_key] = x; });
   // 測定シート／カウンセリング回答の経路（氏名キー）。店舗つきを優先して引く
   const srcByName = {};
   ((nameQ && nameQ.data) || []).forEach(function(x) {
@@ -3243,6 +3247,30 @@ async function renderTrial() {
   const selSrc = decodeURIComponent((location.hash.split('/')[3] || ''));
   function isPortal(r) { return (r.menu || '').indexOf('かんざし') >= 0; }
   function srcOf(r) { return leadSourceOf(r, custBy, manualSrc, isPortal(r), srcByName); }
+  // 体験のその後を判定する。未来の体験はまだ結果が出ていないので判定しない
+  function isCx(r) { return r.status && r.status !== 'accepted'; }
+  function outcomeOf(r) {
+    const o = outcome[nameKey(r.customer_name)];
+    const d = dOf(r);
+    if (isCx(r)) {
+      // 同じ方に確定した体験があれば「振替」で、失注ではない
+      return { kind: (o && o.had_visit) ? 'reschedule' : 'cancel' };
+    }
+    if (d >= jstToday()) return { kind: 'upcoming' };
+    if (o && o.next_date) return { kind: 'won', next: o.next_date, n: o.after_count };
+    return { kind: 'lost' };
+  }
+  function outcomeTag(r) {
+    const v = outcomeOf(r);
+    if (v.kind === 'won') {
+      return '<span class="pill" style="background:#0c7a3e;color:#fff" title="体験のあと '
+        + esc(v.next) + ' に予約が入っています（以降 ' + v.n + '件）">✅ 成約</span>';
+    }
+    if (v.kind === 'lost') return '<span class="pill" style="background:#f0dede;color:#8a2b22" title="体験より後の予約がまだありません">未成約</span>';
+    if (v.kind === 'cancel') return '<span class="pill" style="background:#8a2b22;color:#fff">❌ キャンセル</span>';
+    if (v.kind === 'reschedule') return '<span class="pill" style="background:#e4d7c0;color:#6b4a1a" title="キャンセル後に別の日で来店されています">↩︎ 振替</span>';
+    return '<span class="pill">🆕 予定</span>';
+  }
   // 店舗タブ選択中は店舗名を出さないが、列がずれないよう枠だけ残す
   function storeCell(r, showStore) {
     if (!showStore) return '<span></span>';
@@ -3270,7 +3298,7 @@ async function renderTrial() {
     const tm = c.filter(function(r) { return dOf(r).slice(0, 7) === ym; }).length;
     const lm = c.filter(function(r) { return dOf(r).slice(0, 7) === lastYm; }).length;
     const wk = c.filter(function(r) { const d = dOf(r); return d >= wkStart && d < wkEnd; }).length;
-    const fu = subset.filter(function(r) { return r.booking_start >= nowIso; }).length;  // 下の一覧と件数を揃える
+    const fu = subset.filter(function(r) { return r.booking_start >= nowIso && !isCx(r); }).length;  // 下の一覧と件数を揃える
     const po = subset.filter(function(r) { return isPortal(r) && dOf(r).slice(0, 7) === ym; }).length;
     const nextYm2 = addDays(ym + '-28', 7).slice(0, 7);
     const nm2 = c.filter(function(r) { return dOf(r).slice(0, 7) === nextYm2; }).length;
@@ -3281,7 +3309,31 @@ async function renderTrial() {
       + '<a style="pointer-events:none">先月 ' + lm + '件</a>'
       + '<a style="pointer-events:none">今週 ' + wk + '件</a>'
       + (po ? '<a style="pointer-events:none">🔖 かんざし 今月' + po + '件</a>' : '')
-      + '</div>' + srcChips(subset);
+      + '</div>' + outcomeChips(subset) + srcChips(subset);
+  }
+  // 成約率とキャンセル率。人単位で数える（同じ方の重複予約を二重に数えないため）
+  function outcomeChips(subset) {
+    const seen = {};
+    let visited = 0, won = 0, cxOnly = 0, resched = 0, people = 0;
+    subset.forEach(function(r) {
+      const k = nameKey(r.customer_name);
+      if (!k || seen[k]) return;
+      seen[k] = true; people++;
+      const o = outcome[k] || {};
+      if (o.had_cancel && !o.had_visit) { cxOnly++; return; }
+      if (o.had_cancel && o.had_visit) resched++;
+      if (o.trial_date && o.trial_date < jstToday()) { visited++; if (o.next_date) won++; }
+    });
+    if (!people) return '';
+    const cvr = visited ? Math.round(won / visited * 100) : 0;
+    const cxr = people ? Math.round(cxOnly / people * 100) : 0;
+    return '<div class="chips" style="margin-top:2px">'
+      + '<a style="pointer-events:none;background:#0c7a3e;color:#fff" title="来店済みのうち、体験より後の日に予約が入った方">'
+      + '✅ 成約 ' + won + '/' + visited + '名（' + cvr + '%）</a>'
+      + '<a style="pointer-events:none;background:#8a2b22;color:#fff" title="体験を予約したが来店に至らなかった方（振替を除く）">'
+      + '❌ キャンセル ' + cxOnly + '/' + people + '名（' + cxr + '%）</a>'
+      + (resched ? '<a style="pointer-events:none;background:#e4d7c0" title="キャンセル後に別の日で来店された方">↩︎ 振替 ' + resched + '名</a>' : '')
+      + '</div>';
   }
   // 経路別の内訳（今月／全期間）。クリックでその経路だけに絞り込む
   function srcChips(subset) {
@@ -3306,7 +3358,7 @@ async function renderTrial() {
   function listHtml(subset, showStore) {
     if (!subset.length) { return '<div class="empty">この店舗の体験予約はまだありません（STORESで体験受付が始まると自動で表示されます）</div>'; }
     // これからの体験（未実施）を先に強調表示＝新規対応の準備がすぐ分かる
-    const future = subset.filter(function(r) { return r.booking_start >= nowIso; })
+    const future = subset.filter(function(r) { return r.booking_start >= nowIso && !isCx(r); })
       .sort(function(a, b) { return (a.booking_start || '').localeCompare(b.booking_start || ''); });
     let out = '';
     if (future.length) {
@@ -3333,14 +3385,14 @@ async function renderTrial() {
         out += '<div class="mhead">' + parseInt(curYm2.slice(0, 5), 10) + '年' + parseInt(curYm2.slice(5, 7), 10) + '月　' + mc + '件</div>';
       }
       const future = r.booking_start >= nowIso;
-      out += '<div class="trow">'
+      out += '<div class="trow"' + (isCx(r) ? ' style="opacity:.62"' : '') + '>'
         + '<span class="d' + (future ? ' future' : '') + '">' + fmtDate(r.booking_start) + '</span>'
         + '<span>' + fmtTime(r.booking_start) + '</span>'
         + '<a style="color:var(--accent);text-decoration:none;font-weight:700" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
         + storeCell(r, showStore) + leadBadge(srcOf(r)) + srcSelect(r)
         + '<span class="tstaff" style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
         + '<span>' + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖</span> ' : '')
-        + (future ? '<span class="pill">🆕 予定</span>' : '<span class="pill" style="background:#dde6e0">来店済</span>') + '</span>'
+        + outcomeTag(r) + '</span>'
         + '</div>';
     });
     return out + '</div>';
@@ -3368,7 +3420,8 @@ async function renderTrial() {
   html += statChips(byStore);
   const subset = selSrc ? byStore.filter(function(r) { return srcOf(r).src === selSrc; }) : byStore;
   html += listHtml(subset, !selStore);
-  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の確定予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">✅成約＝体験より後の日に予約が入っている方。未成約＝まだ次の予約がない方。❌キャンセル＝来店に至らなかった方で、別の日に振り替えた方は↩︎振替として区別しています</div>';
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">経路は「新規継続率測定シート」とカウンセリングシートの「エミライズを何で知りましたか？」から自動反映しています。「?」付きはSTORESのデータからの推定なので、各行のプルダウンで選ぶと確定として保存されます</div>';
   app.innerHTML = html;
 
