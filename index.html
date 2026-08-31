@@ -48,7 +48,10 @@
   .trow { display:grid; align-items:center; gap:10px; padding:9px 2px;
           border-bottom:1px solid var(--line); font-size:13px;
           justify-content:start;
-          grid-template-columns:104px 52px 12em 96px 106px 104px 7em auto; }
+          grid-template-columns:104px 52px 12em 96px 106px 104px 7em 124px auto; }
+  .tstamp { font-size:10px; color:var(--sub); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .tstamp .cx { color:#b3261e; font-weight:700; margin-left:8px; }
+  .tstamp .none { opacity:.4; }
   .trow > * { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .trow .d { font-variant-numeric:tabular-nums; }
   .trow .future { color:var(--accent); font-weight:700; }
@@ -3291,6 +3294,16 @@ async function renderTrial() {
   const selSrc = decodeURIComponent((location.hash.split('/')[3] || ''));
   function isPortal(r) { return (r.menu || '').indexOf('かんざし') >= 0; }
   function srcOf(r) { return leadSourceOf(r, custBy, manualSrc, isPortal(r), srcByName); }
+  // 「いつ予約が入ったか」と、キャンセルなら「いつ取り消されたか」を並べる。
+  // 8月より前の体験と、ワンモア（天王寺）の予約はSTORES APIの外なので日時が無い
+  function stampCell(r) {
+    const made = fmtStamp(r.booking_made);
+    const cxAt = fmtStamp(r.canceled_at || r.status_changed_at);
+    let o = '<span class="tstamp">';
+    o += made ? '予約 ' + esc(made) : '<span class="none">予約日時 —</span>';
+    if (isCx(r)) o += '<span class="cx">❌ ' + (cxAt ? esc(cxAt) : '取消') + '</span>';
+    return o + '</span>';
+  }
   // 体験のその後を判定する。未来の体験はまだ結果が出ていないので判定しない
   function isCx(r) { return r.status && r.status !== 'accepted'; }
   function outcomeOf(r) {
@@ -3415,6 +3428,7 @@ async function renderTrial() {
           + storeCell(r, showStore) + leadBadge(srcOf(r)) + srcSelect(r)
           + '<span class="tstaff" style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
           + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖 かんざし</span>' : '<span></span>')
+          + stampCell(r)
           + '</div>';
       });
       out += '</div>';
@@ -3437,6 +3451,7 @@ async function renderTrial() {
         + '<span class="tstaff" style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
         + '<span>' + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖</span> ' : '')
         + outcomeTag(r) + '</span>'
+        + stampCell(r)
         + '</div>';
     });
     return out + '</div>';
