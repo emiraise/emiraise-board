@@ -2187,11 +2187,18 @@ async function renderReport(params) {
 }
 
 // ── 月謝管理（月N回コースの予約消化チェック） ─────────
-function subQuota(subs) {
+function subQuota(subs, merchantId) {
   // 有効な月謝から「月N回」の合計を読み取る（全角数字対応）
+  // 同じ契約が両店の顧客カードに複製されるため、契約元の店舗でだけ数える
+  // （金沢本店と駅西で同じ方が二重に出ていた・2026-09-02）
   let n = 0;
   (subs || []).forEach(function(s) {
     if (s.contract_status !== 'active') return;
+    if (merchantId) {
+      const owned = (s.is_owned_by_current_merchant === true)
+        || (s.merchant_canonical_id && s.merchant_canonical_id === merchantId);
+      if (!owned) return;
+    }
     const normalized = String(s.product_name || '').replace(/[０-９]/g, function(c) {
       return String.fromCharCode(c.charCodeAt(0) - 65248);
     });
@@ -2235,7 +2242,7 @@ async function renderSubs(params) {
     fetchTable('crm_customers', 'merchant_id,customer_id,name,merchant_name,subscriptions'),
     fetchRange(first, afterNextFirst),
     sb.from('crm_subs_notes').select('*').limit(2000),
-    sb.from('crm_reservations').select('merchant_id,customer_id,booking_start,status,store_tag')
+    sb.from('crm_reservations').select('merchant_id,customer_id,customer_name,booking_start,status,store_tag')
       .gte('booking_start', first + 'T00:00:00+09:00').lt('booking_start', afterNextFirst + 'T00:00:00+09:00')
       .neq('status', 'accepted').limit(1000),
   ]);
@@ -2244,10 +2251,12 @@ async function renderSubs(params) {
   (noteQ.data || []).forEach(function(n) { subNotes[custKey(n.merchant_id, n.customer_id)] = n.note || ''; });
 
   // 顧客ごとに当月・翌月の予約数と当月消化数を数える
+  // 予約はお客様単位で数える。金沢の2店舗を行き来する方がいるため、
+  // 顧客IDではなく氏名でまとめないと「予約ゼロ」に見えてしまう
   const cnt = {};
   (resQ.data || []).forEach(function(r) {
-    if (!r.customer_id) return;
-    const k = custKey(r.merchant_id, r.customer_id);
+    const k = nameKey(r.customer_name);
+    if (!k) return;
     const d = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start));
     const c = (cnt[k] = cnt[k] || { thisB: 0, thisV: 0, nextB: 0 });
     if (d.slice(0, 7) === ym) {
@@ -2259,8 +2268,8 @@ async function renderSubs(params) {
   });
   // キャンセル（当月・翌月）を顧客ごとに集計＝チケット/月謝の整合性チェック用（2026-08-24）
   ((cxQ && cxQ.data) || []).forEach(function(r) {
-    if (!r.customer_id) return;
-    const k = custKey(r.merchant_id, r.customer_id);
+    const k = nameKey(r.customer_name);
+    if (!k) return;
     const d = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start));
     const c = (cnt[k] = cnt[k] || { thisB: 0, thisV: 0, nextB: 0 });
     if (d.slice(0, 7) === ym) {
@@ -2275,13 +2284,12 @@ async function renderSubs(params) {
   const list = [];
   const storeSet = {};
   (custQ.data || []).forEach(function(cu) {
-    const N = subQuota(cu.subscriptions);
+    const N = subQuota(cu.subscriptions, cu.merchant_id);
     if (!N) return;
     const stTag = ((cu.merchant_name || '').split(/[\s　]/).pop()) || '店舗不明';
     storeSet[stTag] = true;
     if (storeSel && stTag !== storeSel) return;
-    const k = custKey(cu.merchant_id, cu.customer_id);
-    const c = cnt[k] || { thisB: 0, thisV: 0, nextB: 0 };
+    const c = cnt[nameKey(cu.name)] || { thisB: 0, thisV: 0, nextB: 0 };
     const stThis = subMonthStatus(c.thisB, N, dim - day + 1);
     // 週2ペースが必要なコース（月6回以上）は消化の遅れも警告
     if (N >= 6) {
