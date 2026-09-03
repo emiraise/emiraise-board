@@ -3245,11 +3245,19 @@ function normSource(v) {
   return LEAD_SOURCES.indexOf(t) >= 0 ? t : 'その他';
 }
 // 氏名の表記ゆれを吸収（全角半角・空白・「（モニター）」等の注記を除去）
+// DB側の crm_name_key() と必ず同じ結果にすること。
+// ここが食い違うと、経路も成約ラベルも「該当なし」になって黙って消える
+// （齊藤穂乃果さんの成約が出なかった原因・2026-09-03）
+const NAME_VARIANTS = { '髙':'高','﨑':'崎','濵':'浜','邊':'辺','邉':'辺','齋':'斎','齊':'斉',
+  '冨':'富','栁':'柳','德':'徳','瀨':'瀬','眞':'真','淸':'清','桒':'桑','藪':'薮','嶋':'島',
+  'ヶ':'ケ','ノ':'之' };
 function nameKey(s) {
   return String(s || '').normalize('NFKC')
     .replace(/[（(][^）)]*[）)]/g, '')
     .replace(/^[\s\u3000]*(新規|体験|初回)[\s\u3000]*/, '')  // 予約名の目印を落とす
-    .replace(/[\s\u3000]/g, '').toLowerCase();
+    .replace(/[\s\u3000・]/g, '')
+    .replace(/[髙﨑濵邊邉齋齊冨栁德瀨眞淸桒藪嶋ヶノ]/g, function(c) { return NAME_VARIANTS[c]; })
+    .toLowerCase();
 }
 // 顧客項目（プロフィール項目）から経路っぽい設問の回答を拾う
 function sourceFromProfile(c) {
