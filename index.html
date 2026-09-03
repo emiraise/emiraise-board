@@ -455,6 +455,7 @@ function madeCell(r) {
 }
 
 async function renderDay(dateStr) {
+  const _seq = newRender();
   const d = dateStr || jstToday();
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const from = d + 'T00:00:00+09:00';
@@ -568,6 +569,7 @@ async function renderDay(dateStr) {
     });
     html += '</div>';
   }
+  if (stale(_seq)) return;
   app.innerHTML = html;
   document.getElementById('prevD').onclick = function() { location.hash = '#/?date=' + addDays(d, -1); };
   document.getElementById('nextD').onclick = function() { location.hash = '#/?date=' + addDays(d, 1); };
@@ -587,6 +589,7 @@ async function renderDay(dateStr) {
 
 // ── 顧客プロフィール ──────────────────────
 async function renderCustomer(mid, cid) {
+  const _seq = newRender();
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const nowIso = new Date().toISOString();
   const [cRes, histRes, cancelRes, karteRes, lbRes, exRes, hoRes, poolRes] = await Promise.all([
@@ -945,6 +948,7 @@ async function renderCustomer(mid, cid) {
   html = pagePrefix + '<div class="pgrid2"><div class="pcol">' + cardBasic + cardHist + '</div>'
     + '<div class="pcol">' + cardKa + cardHo + cardLb + cardEx + '</div></div>';
 
+  if (stale(_seq)) return;
   app.innerHTML = html;
 
   // ラベル編集の配線
@@ -1074,9 +1078,11 @@ async function renderCustomer(mid, cid) {
 
 // ── 顧客検索 ──────────────────────────────
 async function renderSearch(q) {
+  const _seq = newRender();
   let html = '<h2>顧客検索</h2><div class="searchbar">'
     + '<input id="sq" placeholder="名前・カナ・電話番号" value="' + esc(q || '') + '">'
     + '<button class="btn" id="sBtn">検索</button></div><div id="sRes"></div>';
+  if (stale(_seq)) return;
   app.innerHTML = html;
   const go = function() {
     const v = document.getElementById('sq').value.trim();
@@ -1145,6 +1151,12 @@ function filterExcl(rows, ex) {
 // 並び替えの列はテーブルによって違うので指定できるようにする
 // （顧客以外のテーブルで merchant_id 固定にしていて400エラーになった・2026-08-31）
 async function fetchTable(table, sel, orderCols) {
+  // 同じ取得を60秒だけ使い回す。顧客マスタはメモを含めて約0.5MBあり、
+  // 月謝・日報・ヒアリング・COMPASSが毎回取り直していて重かった（2026-09-02）
+  return cached('t|' + table + '|' + sel + '|' + (orderCols || []).join(','),
+                function() { return fetchTableRaw(table, sel, orderCols); });
+}
+async function fetchTableRaw(table, sel, orderCols) {
   const cols = orderCols || ['merchant_id', 'customer_id'];
   let all = [];
   for (let page = 0; page < 10; page++) {
@@ -1158,6 +1170,10 @@ async function fetchTable(table, sel, orderCols) {
   return { data: all, error: null };
 }
 async function fetchRange(fromDate, toDateExcl) {
+  return cached('r|' + fromDate + '|' + toDateExcl,
+                function() { return fetchRangeRaw(fromDate, toDateExcl); });
+}
+async function fetchRangeRaw(fromDate, toDateExcl) {
   // 1回の読み込みは1000件で頭打ちになるため、全件揃うまでページ分割で取得する
   // （8月後半の予約が切り捨てられ月謝タブが「予約ゼロ」誤表示になった障害の対策・2026-07-27）
   let all = [];
@@ -1211,11 +1227,22 @@ const GOAL_TAGS = ['姿勢改善', '腰痛改善', '肩こり改善', 'ダイエ
 function custKey(mid, cid) { return mid + '|' + cid; }
 // 短時間キャッシュ（60秒）: タブや日付を行き来しても同じデータを取り直さない（2026-09-01高速化）
 const _qCache = {};
+// 画面の描画世代。タブを素早く切り替えたとき、前の画面の読み込みが
+// あとから終わって新しい画面を上書きしてしまうのを防ぐ
+// （体験を押したのにヒアリングが出る、という症状への対策・2026-09-02）
+let RENDER_SEQ = 0;
+function newRender() { return ++RENDER_SEQ; }
+function stale(seq) { return seq !== RENDER_SEQ; }
+
 function cached(key, fn) {
   const hit = _qCache[key];
   const now = Date.now();
   if (hit && now - hit.t < 60000) return hit.p;
-  const p = fn();
+  const p = fn().then(function(r) {
+    // 失敗をキャッシュすると60秒間ずっとエラーのままになるので、消す
+    if (r && r.error) delete _qCache[key];
+    return r;
+  }, function(e) { delete _qCache[key]; throw e; });
   _qCache[key] = { t: now, p: p };
   return p;
 }
@@ -1776,6 +1803,7 @@ function tlTabsHtml(mode, date, staff) {
     + '</div>';
 }
 async function renderTimeline(params) {
+  const _seq = newRender();
   const mode = params.get('mode') || 'day';
   const today = jstToday();
   const date = params.get('date') || today;
@@ -1869,6 +1897,7 @@ async function renderTimeline(params) {
       html += '</div></div>';
       html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px"><span style="color:#1f6f54;font-weight:700">緑点線「空」＝今お客様が予約できる枠（STORES公開情報・10分ごと更新）</span>｜斜線＝シフト外・休み・会議（シフト表/カレンダーから自動）｜グレー＝固定ブロック（休憩・休み）｜<span style="color:#805e12;font-weight:700">琥珀↔＝動かせるブロック</span>。<span style="color:#5a6570;font-weight:700">🚫濃いグレー＝STORESのブロック（理由メモ付き・管理画面から取得）</span>｜🚫薄い模様＝ブロックとみられる時間（推定）</div>';
     }
+    if (stale(_seq)) return;
     app.innerHTML = html;
     const rerenderDay = function() { renderTimeline(params); };
     wireBlockDelete(rerenderDay);
@@ -1987,6 +2016,7 @@ async function renderTimeline(params) {
       }
     }
     html += '</div></div>';
+    if (stale(_seq)) return;
     app.innerHTML = html;
 
     const sel = document.getElementById('tlStaff');
@@ -2022,6 +2052,7 @@ function durMins(r) {
   return e - s;
 }
 async function renderReport(params) {
+  const _seq = newRender();
   const range = params.get('range') || 'day';
   const today = jstToday();
   const date = params.get('date') || today;
@@ -2181,6 +2212,7 @@ async function renderReport(params) {
   });
   html += '</div>';
 
+  if (stale(_seq)) return;
   app.innerHTML = html;
   document.getElementById('rpPrev').onclick = function() { location.hash = '#/report?range=' + range + '&date=' + prevD; };
   document.getElementById('rpNext').onclick = function() { location.hash = '#/report?range=' + range + '&date=' + nextD; };
@@ -2223,6 +2255,7 @@ function subNextStatus(booked, N, day) {
   return { s: 2, icon: '🟡', text: 'あと' + (N - booked) + '回未予約' };
 }
 async function renderSubs(params) {
+  const _seq = newRender();
   const storeSel = (params && params.get('store')) || '';
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const today = jstToday();
@@ -2361,6 +2394,7 @@ async function renderSubs(params) {
   });
   html += '</tbody></table></div>';
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">備考はその場で入力→欄の外をタップ（またはEnter）で自動保存。回数が枠と合わない理由などをお客様ごとにメモできます</div>';
+  if (stale(_seq)) return;
   app.innerHTML = html;
   const who = await myStaffName();
   app.querySelectorAll('.subnote').forEach(function(inp) {
@@ -2379,6 +2413,7 @@ async function renderSubs(params) {
 
 // ── スタッフ別レッスン実績（週×月の件数集計・除外名簿適用済み） ─────
 async function renderStats(params) {
+  const _seq = newRender();
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   if (!(await myAdmin())) { app.innerHTML = '<div class="empty">このページは管理者のみ閲覧できます</div>'; return; }
   const ym = (params && params.get('month')) || jstToday().slice(0, 7);
@@ -2974,6 +3009,7 @@ async function renderStats(params) {
     html += '</tbody></table></div>';
     html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">確定予約のみ・キャンセルとスタッフ内部予約（除外名簿）は含みません。週は月曜始まり。「済」は現時点で終了したレッスン、「予定」はこれからの予約。月合計はその月の1日〜末日のレッスン数。合計行の「最大◯枠」＝この表にいるスタッフの出勤枠の合計（店舗ページでは店舗別枠で計算）＝その月の最大キャパです</div>';
   }
+  if (stale(_seq)) return;
   app.innerHTML = html;
   app.querySelectorAll('.plopen').forEach(function(a) {
     a.addEventListener('click', function() {
@@ -3025,6 +3061,7 @@ function karteFirstDate(memo) {
 // アラート（強い赤表示）は出さない。9回以上は制度開始前からの既存客なので別枠にまとめる。
 const MID_TARGET = 8;
 async function renderMidCounseling(params) {
+  const _seq = newRender();
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const storeSel = (params && params.get('store')) || '';
   const [resQ, custQ, midQ] = await Promise.all([
@@ -3160,6 +3197,7 @@ async function renderMidCounseling(params) {
   if (doneList.length) html += block('✅ 実施済み', doneList, 'done', '');
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">通算回数は「ボードの実来店」と「カルテに書かれたセッション記録（n/4回の数）」の多い方を採用（2026年8月のシステム移行前の来店はカルテが唯一の記録のため）。回数の横の(ボード)(カルテ)がその根拠です。'
     + '<b>🆕半年以内</b>＝初回から半年以内のお客様＝体験から成約した新しい方で、優先的にヒアリングする対象として各グループの先頭に表示しています。6・7回目はアラートを出さず日付の予告のみです</div>';
+  if (stale(_seq)) return;
   app.innerHTML = html;
 
   const who = await myStaffName();
@@ -3258,6 +3296,7 @@ function leadBadge(v) {
 }
 
 async function renderTrial() {
+  const _seq = newRender();
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const selStore = decodeURIComponent((location.hash.split('/')[2] || ''));
   const today = jstToday();
@@ -3490,6 +3529,7 @@ async function renderTrial() {
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">✅成約＝体験より後の日に予約が入っている方。未成約＝まだ次の予約がない方。❌キャンセル＝来店に至らなかった方で、別の日に振り替えた方は↩︎振替として区別しています</div>';
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">経路は「新規継続率測定シート」とカウンセリングシートの「エミライズを何で知りましたか？」から自動反映しています。「?」付きはSTORESのデータからの推定なので、各行のプルダウンで選ぶと確定として保存されます</div>';
+  if (stale(_seq)) return;
   app.innerHTML = html;
 
   const who = await myStaffName();
@@ -3535,11 +3575,13 @@ const FIN_SHORT = { '金沢本店': '本店', '金沢駅西店': '駅西', '富�
                     '福井高柳店': '福井', '天王寺店': '天王寺', '運営本部': '本部' };
 
 async function renderFinance(params) {
+  const _seq = newRender();
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const q = await sb.from('v_store_monthly').select('*');
   if (q.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(q.error.message) + '</div>'; return; }
   const rows = q.data || [];
   if (!rows.length) {
+    if (stale(_seq)) return;
     app.innerHTML = '<div class="empty">財務データの閲覧権限がありません。<br>'
       + '<span style="font-size:12px">見られるようにするには大地さんに依頼してください。</span></div>';
     return;
@@ -3623,6 +3665,7 @@ async function renderFinance(params) {
   });
   html += '</tbody></table></div>';
 
+  if (stale(_seq)) return;
   app.innerHTML = html;
 }
 
