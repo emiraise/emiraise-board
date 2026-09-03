@@ -3334,8 +3334,11 @@ async function renderTrial() {
     fetchTable('v_trial_outcomes', 'name_key,trial_date,next_date,after_count,had_visit,had_cancel', ['name_key']),
   ]);
   // 体験のその後（体験より後の日に予約が入っていれば成約とみなす）
+  // 取得に失敗すると全員「未成約」に見えてしまうので、黙って落とさず画面に出す
   const outcome = {};
+  const outErr = (outQ && outQ.error) ? outQ.error.message : '';
   ((outQ && outQ.data) || []).forEach(function(x) { outcome[x.name_key] = x; });
+  const srcErr = (nameQ && nameQ.error) ? nameQ.error.message : '';
   // 測定シート／カウンセリング回答の経路（氏名キー）。店舗つきを優先して引く
   const srcByName = {};
   ((nameQ && nameQ.data) || []).forEach(function(x) {
@@ -3535,6 +3538,12 @@ async function renderTrial() {
   const subset = selSrc ? byStore.filter(function(r) { return srcOf(r).src === selSrc; }) : byStore;
   html += listHtml(subset, !selStore);
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
+  if (outErr || srcErr) {
+    html += '<div class="mhead warn">⚠️ データを読み込めませんでした'
+      + (outErr ? '（成約判定: ' + esc(outErr) + '）' : '')
+      + (srcErr ? '（流入経路: ' + esc(srcErr) + '）' : '')
+      + ' — 表示が正しくない可能性があります</div>';
+  }
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">✅成約＝体験より後の日に予約が入っている方。未成約＝まだ次の予約がない方。❌キャンセル＝来店に至らなかった方で、別の日に振り替えた方は↩︎振替として区別しています</div>';
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">経路は「新規継続率測定シート」とカウンセリングシートの「エミライズを何で知りましたか？」から自動反映しています。「?」付きはSTORESのデータからの推定なので、各行のプルダウンで選ぶと確定として保存されます</div>';
   if (stale(_seq)) return;
