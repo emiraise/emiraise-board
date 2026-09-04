@@ -3426,6 +3426,36 @@ async function renderTrial() {
       + (po ? '<a style="pointer-events:none">🔖 かんざし 今月' + po + '件</a>' : '')
       + '</div>' + outcomeChips(subset) + srcChips(subset);
   }
+  // 月ごとの内訳。同じ方・同じ日・同じ店舗の重複取り込み（STORESとワンモア、
+  // 「新規　◯◯」表記など）は1件に寄せてから数える
+  function monthStats(list) {
+    const seen = {};
+    let total = 0, cx = 0, visited = 0, won = 0;
+    list.forEach(function(r) {
+      const key = nameKey(r.customer_name) + '|' + dOf(r) + '|' + (r.store_tag || '');
+      if (seen[key]) return;
+      seen[key] = true;
+      total++;
+      if (isCx(r)) { cx++; return; }
+      if (dOf(r) < jstToday()) {
+        visited++;
+        const o = outcome[nameKey(r.customer_name)];
+        if (o && o.next_date) won++;
+      }
+    });
+    return { total: total, cx: cx, visited: visited, won: won };
+  }
+  function monthStatsHtml(list) {
+    const m = monthStats(list);
+    const cxr = m.total ? Math.round(m.cx / m.total * 100) : 0;
+    const cvr = m.visited ? Math.round(m.won / m.visited * 100) : 0;
+    let o = '<span style="font-weight:400;font-size:12px;margin-left:10px">';
+    o += '予約 ' + m.total + '件';
+    o += '　<span style="color:#8a2b22;font-weight:700">❌ キャンセル ' + m.cx + '件（' + cxr + '%）</span>';
+    o += '　来店 ' + m.visited + '件 → <span style="color:#0c7a3e;font-weight:700">✅ 成約 '
+       + m.won + '件（' + cvr + '%）</span>';
+    return o + '</span>';
+  }
   // 成約率とキャンセル率。人単位で数える（同じ方の重複予約を二重に数えないため）
   function outcomeChips(subset) {
     const seen = {};
@@ -3497,8 +3527,9 @@ async function renderTrial() {
       const d = dOf(r);
       if (d.slice(0, 7) !== curYm2) {
         curYm2 = d.slice(0, 7);
-        const mc = subset.filter(function(x) { return dOf(x).slice(0, 7) === curYm2; }).length;
-        out += '<div class="mhead">' + parseInt(curYm2.slice(0, 5), 10) + '年' + parseInt(curYm2.slice(5, 7), 10) + '月　' + mc + '件</div>';
+        const mrows = subset.filter(function(x) { return dOf(x).slice(0, 7) === curYm2; });
+        out += '<div class="mhead">' + parseInt(curYm2.slice(0, 5), 10) + '年' + parseInt(curYm2.slice(5, 7), 10) + '月'
+          + monthStatsHtml(mrows) + '</div>';
       }
       const future = r.booking_start >= nowIso;
       out += '<div class="trow"' + (isCx(r) ? ' style="opacity:.62"' : '') + '>'
