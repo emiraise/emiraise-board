@@ -312,6 +312,8 @@ function addDays(dstr, n) {
   return new Intl.DateTimeFormat('sv-SE', { timeZone:TZ }).format(d);
 }
 const STORE_COLORS = ['#2f6f5f', '#5a67a5', '#b0743a', '#8a5aa5', '#3a7fb0'];
+// 店舗の並び順（予約タブ・体験タブなどで共通）
+const STORE_ORDER_ALL = ['金沢本店', '金沢駅西店', '富山東店', '福井高柳店', '天王寺店'];
 const STORE_COLOR_MAP = { '金沢本店': '#b04a4a', '金沢駅西店': '#2f6f5f', '富山東店': '#5a67a5', '福井高柳店': '#b0743a', '天王寺店': '#8a5aa5' };
 function storeColor(tag) {
   if (STORE_COLOR_MAP[tag]) return STORE_COLOR_MAP[tag];
@@ -534,7 +536,7 @@ async function renderDay(dateStr) {
     });
     html += '</div><div class="storecols">';
     // 店舗ごとの列（左から固定順・大地さん指定 2026-07-25）
-    const STORE_ORDER = ['金沢本店', '金沢駅西店', '富山東店', '福井高柳店', '天王寺店'];
+    const STORE_ORDER = STORE_ORDER_ALL.slice();
     const byStore = {};
     data.forEach(function(r) {
       const k = r.store_tag || '店舗不明';
@@ -3230,7 +3232,7 @@ async function renderMidCounseling(params) {
 // から自動推定し、確定できないものはスタッフが画面のプルダウンで指定する。
 // 分類は「新規継続率測定シート」の入力ルールタブと
 // カウンセリングシート「エミライズを何で知りましたか？」の選択肢に合わせる
-const LEAD_SOURCES = ['紹介', '紹介CP', 'インスタ', '検索', 'ホットペッパー', '公式LINE', 'チラシ', 'その他'];
+const LEAD_SOURCES = ['紹介', '紹介CP', 'インスタ', '検索', 'ホットペッパー', '公式LINE', 'かんざし', 'チラシ', 'その他'];
 // 店舗バッジ（STORE_COLOR_MAP）と並ぶため、店舗色とも経路どうしとも
 // 見分けがつく色を選んである（CIE-Lab距離26以上）。安易に変えないこと
 const LEAD_STYLE = {
@@ -3281,6 +3283,9 @@ function leadSourceOf(r, cust, manual, isPortalRow, byName, pKey) {
   const key = (r.merchant_id || '') + '|' + r.customer_id;
   if (manual && manual[key]) return { src: normSource(manual[key]), auto: false };
   // 継続率測定シート／カウンセリング回答に本人の申告があればそれが正
+  // かんざし経由は予約メニューに「(かんざしから自動生成)」と残る確かな記録なので、
+  // シートの記入より優先する（どこで知ったかではなく、どの窓口で予約したか）
+  if (isPortalRow) return { src: 'かんざし', auto: false, from: 'portal' };
   if (byName) {
     const keys = [pKey(r), nameKey(r.customer_name)];
     for (let i = 0; i < keys.length; i++) {
@@ -3289,7 +3294,6 @@ function leadSourceOf(r, cust, manual, isPortalRow, byName, pKey) {
       if (rec) return { src: normSource(rec.source), auto: false, from: rec.origin };
     }
   }
-  if (isPortalRow) return { src: 'かんざし', auto: true };
   const c = cust && cust[key];
   if (c) {
     if (c.channel) return { src: normSource(c.channel), auto: true };
@@ -3308,6 +3312,7 @@ function leadBadge(v) {
   const why = v.auto ? 'STORESのデータからの推定（プルダウンで確定できます）'
     : v.from === 'form' ? 'カウンセリングシートのご本人の回答'
     : v.from === 'sheet' ? '新規継続率測定シートの記入'
+    : v.from === 'portal' ? 'かんざし経由の予約（予約メニューに記録が残っています）'
     : v.from === 'alias' ? 'シート側の氏名が1文字違いのため、同一のお客様として照合したもの'
     : 'スタッフがこの画面で指定した経路';
   return '<span class="badge" style="background:' + bg + ';font-size:10px" title="' + why + '">'
@@ -3499,6 +3504,63 @@ async function renderTrial() {
       + (resched ? '<a style="pointer-events:none;background:#e4d7c0" title="キャンセル後に別の日で来店された方">↩︎ 振替 ' + resched + '名</a>' : '')
       + '</div>';
   }
+  // かんざし連携の実績。予約メニューに「(かんざしから自動生成)」と残るので確実に数えられる。
+  // どの店舗で連携が生きているかを、憶測ではなく実際の予約から示す
+  function kanzashiHtml(all) {
+    const rows = all.filter(isPortal);
+    const byStore = {}, byMonth = {};
+    let cx = 0, visited = 0, won = 0;
+    const seen = {};
+    rows.forEach(function(r) {
+      const k = personKey(r) + '|' + dOf(r);
+      if (seen[k]) return;
+      seen[k] = true;
+      const st = r.store_tag || '店舗不明';
+      byStore[st] = (byStore[st] || 0) + 1;
+      const m = dOf(r).slice(0, 7);
+      byMonth[m] = (byMonth[m] || 0) + 1;
+      if (isCx(r)) { cx++; return; }
+      if (dOf(r) < jstToday()) {
+        visited++;
+        const o = outcome[personKey(r)] || outcome[nameKey(r.customer_name)];
+        if (o && o.next_date) won++;
+      }
+    });
+    const total = Object.keys(seen).length;
+    const cvr = visited ? Math.round(won / visited * 100) : 0;
+    // 連携が入っていない店舗も並べて、どこが未接続か分かるようにする
+    const stores = STORE_ORDER_ALL.slice();
+    Object.keys(byStore).forEach(function(k) { if (stores.indexOf(k) < 0) stores.push(k); });
+    let o = '<div class="card" style="border-left:5px solid ' + LEAD_STYLE['かんざし'] + '">'
+      + '<h3>🔖 かんざし連携の実績</h3>';
+    if (!total) {
+      o += '<div class="empty">かんざし経由の予約はまだありません</div></div>';
+      return o;
+    }
+    o += '<div class="chips">'
+      + '<a style="pointer-events:none;background:' + LEAD_STYLE['かんざし'] + ';color:#fff">予約 ' + total + '件</a>'
+      + '<a style="pointer-events:none">来店 ' + visited + '件</a>'
+      + '<a style="pointer-events:none;background:#0c7a3e;color:#fff">✅ 成約 ' + won + '件（' + cvr + '%）</a>'
+      + (cx ? '<a style="pointer-events:none;background:#8a2b22;color:#fff">❌ キャンセル ' + cx + '件</a>' : '')
+      + '</div>';
+    o += '<div class="chips" style="margin-top:2px">';
+    stores.forEach(function(st) {
+      const n = byStore[st] || 0;
+      o += '<a style="pointer-events:none' + (n ? ';border-left:4px solid ' + storeColor(st) : ';opacity:.45') + '">'
+        + esc(st) + ' ' + (n ? n + '件' : '連携なし') + '</a>';
+    });
+    o += '</div>';
+    const ms = Object.keys(byMonth).sort();
+    o += '<div class="chips" style="margin-top:2px">';
+    ms.forEach(function(m) {
+      o += '<a style="pointer-events:none">' + parseInt(m.slice(5, 7), 10) + '月 ' + byMonth[m] + '件</a>';
+    });
+    o += '</div>';
+    o += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
+      + '予約メニューに「(かんざしから自動生成)」と記録が残るため、確実に判別できます。'
+      + '「連携なし」の店舗はかんざし経由の予約が1件もありません</div>';
+    return o + '</div>';
+  }
   // 経路別の内訳（今月／全期間）。クリックでその経路だけに絞り込む
   function srcChips(subset) {
     const tally = {}, tallyM = {};
@@ -3586,6 +3648,7 @@ async function renderTrial() {
   const byStore = selStore ? (stores[selStore] || []) : rows;
   html += statChips(byStore);
   const subset = selSrc ? byStore.filter(function(r) { return srcOf(r).src === selSrc; }) : byStore;
+  html += kanzashiHtml(byStore);
   html += listHtml(subset, !selStore);
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
   if (outErr || srcErr) {
