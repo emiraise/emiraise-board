@@ -3834,33 +3834,45 @@ function constraintOf(c) {
 async function renderData(params) {
   const _seq = newRender();
   app.innerHTML = '<div class="empty">読み込み中…</div>';
-  const selStore = params.get('store') || '';
-  const selDow   = params.get('dow') || '';
-  const selStaff = params.get('staff') || '';
-  const selBand  = params.get('band') || '';
-  const selType  = params.get('type') || '';   // 傾向（朝だけ／夜だけ…）
-  const selFlex  = params.get('flex') || '';   // 再現性（固定／準固定／柔軟）
-  const selRange = params.get('range') || '';   // 先月・今月・来月といった月指定
-  const days = parseInt(params.get('days') || '180', 10);
+  // 絞り込みはすべて複数選択（カンマ区切り）。空＝すべて（2026-09-11 大地さん指定）
+  function multi(name) {
+    const v = params.get(name) || '';
+    return v ? v.split(',').filter(Boolean) : [];
+  }
+  function hit(list, v) { return !list.length || list.indexOf(String(v)) >= 0; }
+  const selStores = multi('store');
+  const selDows   = multi('dow');
+  const selStaffs = multi('staff');
+  const selBands  = multi('band');
+  const selTypes  = multi('type');   // 傾向（朝だけ／夜だけ…）
+  const selFlexs  = multi('flex');   // 再現性（固定／準固定／柔軟）
+  const selRanges = multi('range');  // 期間（すべて／今月／先月／来月／直近◯日）
 
   const today = jstToday();
-  // 期間の決め方: range が指定されていればその月、無ければ直近◯日
   function monthRange(offset) {
     const y = parseInt(today.slice(0, 4), 10), m = parseInt(today.slice(5, 7), 10) - 1 + offset;
     const a = new Date(Date.UTC(y, m, 1)), b = new Date(Date.UTC(y, m + 1, 1));
     return [a.toISOString().slice(0, 10), b.toISOString().slice(0, 10)];
   }
-  const RANGES = { last: -1, cur: 0, next: 1 };
-  let from, to2, rangeLabel;
-  if (selRange === 'all') {
-    from = '2024-01-01'; to2 = addDays(today, 92); rangeLabel = '全期間';
-  } else if (selRange && RANGES[selRange] !== undefined) {
-    const r2 = monthRange(RANGES[selRange]);
-    from = r2[0]; to2 = r2[1];
-    rangeLabel = parseInt(from.slice(5, 7), 10) + '月';
-  } else {
-    from = addDays(today, -days); to2 = today; rangeLabel = '直近' + days + '日';
-  }
+  // 期間の候補。複数選んだときは、その全部を含む範囲にする
+  const RANGE_DEF = {
+    all:  { t: 'すべて',     r: function() { return ['2024-01-01', addDays(today, 92)]; } },
+    cur:  { t: '今月',       r: function() { return monthRange(0); } },
+    last: { t: '先月',       r: function() { return monthRange(-1); } },
+    next: { t: '来月',       r: function() { return monthRange(1); } },
+    d90:  { t: '直近90日',   r: function() { return [addDays(today, -90), today]; } },
+    d180: { t: '直近180日',  r: function() { return [addDays(today, -180), today]; } },
+    d365: { t: '1年',        r: function() { return [addDays(today, -365), today]; } },
+  };
+  const RANGE_ORDER = ['all', 'cur', 'last', 'next', 'd90', 'd180', 'd365'];
+  const useRanges = selRanges.length ? selRanges.filter(function(k) { return RANGE_DEF[k]; }) : ['d180'];
+  let from = null, to2 = null;
+  useRanges.forEach(function(k) {
+    const r2 = RANGE_DEF[k].r();
+    if (from === null || r2[0] < from) from = r2[0];
+    if (to2 === null || r2[1] > to2) to2 = r2[1];
+  });
+  const rangeLabel = useRanges.map(function(k) { return RANGE_DEF[k].t; }).join('＋');
   const [resQ, custQ, shiftQ, codes] = await Promise.all([
     fetchRange(from, to2),
     fetchTable('crm_customers', 'merchant_id,customer_id,name,merchant_name,subscriptions'),
@@ -3902,10 +3914,10 @@ async function renderData(params) {
     const staff = (r.staff_names && r.staff_names[0]) || '担当なし';
     if (RETIRED_STAFF.indexOf(staff) >= 0) return;
     staffSet[staff] = true;
-    if (selStore && (r.store_tag || '') !== selStore) return;
-    if (selDow && String(wd) !== selDow) return;
-    if (selStaff && staff !== selStaff) return;
-    if (selBand && band !== selBand) return;
+    if (!hit(selStores, r.store_tag || '')) return;
+    if (!hit(selDows, wd)) return;
+    if (!hit(selStaffs, staff)) return;
+    if (!hit(selBands, band)) return;
     const key = wd + '|' + band;
     grid[key] = (grid[key] || 0) + 1;
     bandTot[band] = (bandTot[band] || 0) + 1;
@@ -3923,20 +3935,29 @@ async function renderData(params) {
   });
 
   function link(over) {
-    const q = { store: selStore, dow: selDow, staff: selStaff, band: selBand,
-                type: selType, flex: selFlex, range: selRange, days: String(days) };
+    const q = { store: selStores.join(','), dow: selDows.join(','), staff: selStaffs.join(','),
+                band: selBands.join(','), type: selTypes.join(','), flex: selFlexs.join(','),
+                range: selRanges.join(','), month: params.get('month') || '' };
     Object.keys(over).forEach(function(k) { q[k] = over[k]; });
     const parts = [];
-    Object.keys(q).forEach(function(k) { if (q[k] && !(k === 'days' && q[k] === '180')) parts.push(k + '=' + encodeURIComponent(q[k])); });
+    Object.keys(q).forEach(function(k) { if (q[k]) parts.push(k + '=' + encodeURIComponent(q[k])); });
     return '#/data' + (parts.length ? '?' + parts.join('&') : '');
   }
+  // クリックで選択を足し引きする（複数選択）
+  function toggled(list, v) {
+    const a = list.slice(), i = a.indexOf(String(v));
+    if (i >= 0) a.splice(i, 1); else a.push(String(v));
+    return a.join(',');
+  }
   function chipRow(label, items, cur, key) {
-    let o = '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:44px">' + label + '</span>';
-    o += '<a href="' + link((function(){ const x={}; x[key]=''; return x; })()) + '"' + (!cur ? ' class="on"' : '') + '>すべて</a>';
+    let o = '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:44px">'
+      + label + (cur.length > 1 ? '<b style="color:var(--accent)">×' + cur.length + '</b>' : '') + '</span>';
+    const clearQ = {}; clearQ[key] = '';
+    o += '<a href="' + link(clearQ) + '"' + (!cur.length ? ' class="on"' : '') + '>すべて</a>';
     items.forEach(function(it) {
       const v = String(it.v);
-      o += '<a href="' + link((function(){ const x={}; x[key]=v; return x; })()) + '"'
-        + (cur === v ? ' class="on"' : '') + '>' + esc(it.t) + '</a>';
+      const q = {}; q[key] = toggled(cur, v);
+      o += '<a href="' + link(q) + '"' + (cur.indexOf(v) >= 0 ? ' class="on"' : '') + '>' + esc(it.t) + '</a>';
     });
     return o + '</div>';
   }
@@ -3944,38 +3965,23 @@ async function renderData(params) {
   let html = '<h2>📊 データ（シフト設計用）<small style="font-weight:400;color:var(--sub);font-size:12px">　'
     + rangeLabel + '・内部予定は除外</small></h2>';
   const stores = STORE_ORDER_ALL.slice();
-  html += chipRow('店舗', stores.map(function(x) { return { v: x, t: x }; }), selStore, 'store');
-  html += chipRow('曜日', [1,2,3,4,5,6,0].map(function(w) { return { v: w, t: DOW_LABEL[w] + '曜' }; }), selDow, 'dow');
+  html += chipRow('店舗', stores.map(function(x) { return { v: x, t: x }; }), selStores, 'store');
+  html += chipRow('曜日', [1,2,3,4,5,6,0].map(function(w) { return { v: w, t: DOW_LABEL[w] + '曜' }; }), selDows, 'dow');
   html += chipRow('担当', Object.keys(staffSet).sort(function(a, b) {
       const ia = STAFF_ORDER.indexOf(a), ib = STAFF_ORDER.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b, 'ja');
-    }).map(function(x) { return { v: x, t: x }; }), selStaff, 'staff');
-  html += chipRow('時間帯', BANDS.map(function(b) { return { v: b.key, t: b.label + ' ' + b.range }; }), selBand, 'band');
+    }).map(function(x) { return { v: x, t: x }; }), selStaffs, 'staff');
+  html += chipRow('時間帯', BANDS.map(function(b) { return { v: b.key, t: b.label + ' ' + b.range }; }), selBands, 'band');
   html += chipRow('傾向', [
       { v: '朝', t: '🌅 朝だけ' }, { v: '午前昼', t: '☀️ 午前〜昼のみ' },
       { v: '夕方以降', t: '🌆 夕方以降のみ' }, { v: '夜', t: '🌙 夜だけ' },
-      { v: '土日', t: '🗓 土日のみ' }], selType, 'type');
+      { v: '土日', t: '🗓 土日のみ' }], selTypes, 'type');
   html += chipRow('再現性', [
       { v: 'fixed', t: '🔒 固定（この時間しか来ない）' },
       { v: 'semi',  t: '🔁 準固定（ある程度決まっている）' },
-      { v: 'free',  t: '🔓 柔軟（空きを埋められる）' }], selFlex, 'flex');
-  // 期間の並びは大地さん指定（2026-09-11）: 全て→今月→先月→来月→90日→180日→1年
-  const RANGE_CHIPS = [
-    { range: 'all',  t: 'すべて' },
-    { range: 'cur',  t: '今月' },
-    { range: 'last', t: '先月' },
-    { range: 'next', t: '来月' },
-    { days: '90',    t: '直近90日' },
-    { days: '180',   t: '直近180日' },
-    { days: '365',   t: '1年' },
-  ];
-  html += '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:44px">期間</span>'
-    + RANGE_CHIPS.map(function(x) {
-        const on = x.range ? selRange === x.range : (!selRange && String(days) === x.days);
-        return '<a href="' + link(x.range ? { range: x.range } : { days: x.days, range: '' }) + '"'
-          + (on ? ' class="on"' : '') + '>' + x.t + '</a>';
-      }).join('')
-    + '</div>';
+      { v: 'free',  t: '🔓 柔軟（空きを埋められる）' }], selFlexs, 'flex');
+  html += chipRow('期間', RANGE_ORDER.map(function(k) { return { v: k, t: RANGE_DEF[k].t }; }),
+                  selRanges, 'range');
 
   const totalAll = Object.keys(bandTot).reduce(function(a, k) { return a + bandTot[k]; }, 0);
   if (!totalAll) {
@@ -3991,7 +3997,7 @@ async function renderData(params) {
   BANDS.forEach(function(b) { html += '<th>' + b.label + '<br><small style="font-weight:400">' + b.range + '</small></th>'; });
   html += '<th>合計</th></tr></thead><tbody>';
   [1,2,3,4,5,6,0].forEach(function(w) {
-    if (selDow && String(w) !== selDow) return;
+    if (!hit(selDows, w)) return;
     html += '<tr><td>' + DOW_LABEL[w] + '曜</td>';
     BANDS.forEach(function(b) {
       const n = grid[w + '|' + b.key] || 0;
@@ -4030,20 +4036,19 @@ async function renderData(params) {
   (shiftQ || []).forEach(function(sh) {
     if (sh.kind !== 'work') return;
     if (RETIRED_STAFF.indexOf(sh.staff_name) >= 0) return;
-    if (selStaff && sh.staff_name !== selStaff) return;
+    if (!hit(selStaffs, sh.staff_name)) return;
     const wd = dowOfYmd(sh.date);
-    if (selDow && String(wd) !== selDow) return;
+    if (!hit(selDows, wd)) return;
     // 店舗で絞っているときは、その店舗の勤務だけ数える
-    if (selStore) {
+    if (selStores.length) {
       const st = SHIFT_STORE_FULL[sh.store] || sh.store || '';
-      if (st && st !== selStore) return;
-      if (!st) return;
+      if (!st || !hit(selStores, st)) return;
     }
     hasShift[sh.staff_name + '|' + sh.date] = true;
     shiftDays[sh.staff_name] = (shiftDays[sh.staff_name] || 0) + 1;
     const ranges = codeRanges(sh);
     BANDS.forEach(function(b) {
-      if (selBand && b.key !== selBand) return;
+      if (!hit(selBands, b.key)) return;
       let h = 0;
       ranges.forEach(function(r) { h += overlapHours(r[0], r[1], b.from, Math.min(b.to, 21)); });
       if (h <= 0) return;
@@ -4066,7 +4071,7 @@ async function renderData(params) {
     // シフト表が同期されていない店舗（天王寺＝ワンモアなど）は供給が出せない
     html += '<div class="mhead warn">この条件ではシフト（出勤）のデータが無いため、'
       + '需要と供給のギャップは出せません。'
-      + (selStore === '天王寺店' ? '天王寺店はシフト表が連携されていません' : '条件をゆるめてお試しください')
+      + (selStores.length === 1 && selStores[0] === '天王寺店' ? '天王寺店はシフト表が連携されていません' : '条件をゆるめてお試しください')
       + '</div>';
   }
   if (supTotal > 0) {
@@ -4076,10 +4081,10 @@ async function renderData(params) {
     BANDS.forEach(function(b) { html += '<th>' + b.label + '<br><small style="font-weight:400">' + b.range + '</small></th>'; });
     html += '</tr></thead><tbody>';
     [1,2,3,4,5,6,0].forEach(function(w) {
-      if (selDow && String(w) !== selDow) return;
+      if (!hit(selDows, w)) return;
       html += '<tr><td>' + DOW_LABEL[w] + '曜</td>';
       BANDS.forEach(function(b) {
-        if (selBand && b.key !== selBand) { html += '<td style="color:#ccc">·</td>'; return; }
+        if (!hit(selBands, b.key)) { html += '<td style="color:#ccc">·</td>'; return; }
         const dem = demShift[w + '|' + b.key] || 0;
         const sup = supply[w + '|' + b.key] || 0;
         if (!sup && !dem) { html += '<td style="color:#ccc">·</td>'; return; }
@@ -4105,18 +4110,18 @@ async function renderData(params) {
     rows.forEach(function(r) {
       const st = (r.staff_names && r.staff_names[0]) || '担当なし';
       if (RETIRED_STAFF.indexOf(st) >= 0) return;
-      if (selStore && (r.store_tag || '') !== selStore) return;
+      if (!hit(selStores, r.store_tag || '')) return;
       const d = new Date(r.booking_start);
       const ymd = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(d);
       const wd = dowOfYmd(ymd);
-      if (selDow && String(wd) !== selDow) return;
+      if (!hit(selDows, wd)) return;
       // シフトに出勤の記録が無い日は、持ち枠が分からないので分子からも外す
       if (!hasShift[st + '|' + ymd]) { offShift[st] = (offShift[st] || 0) + 1; return; }
       const hh = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hour12: false }).format(d), 10);
       const bd = bandOf(hh);
       if (!bd) return;
-      if (selBand && bd !== selBand) return;
-      if (selStaff && st !== selStaff) return;
+      if (!hit(selBands, bd)) return;
+      if (!hit(selStaffs, st)) return;
       byStaff[st] = (byStaff[st] || 0) + 1;
     });
     const names = Object.keys(staffSupply).sort(function(a, b) {
@@ -4168,8 +4173,12 @@ async function renderData(params) {
   const TYPE_TAG = { '朝': '🌅 朝だけ', '午前昼': '☀️ 午前〜昼のみ', '夕方以降': '🌆 夕方以降のみ',
                      '夜': '🌙 夜だけ', '土日': '🗓 土日のみ' };
   const listAll = list;
-  if (selType) list = list.filter(function(x) { return x.cons.tag === TYPE_TAG[selType]; });
-  if (selFlex) list = list.filter(function(x) { return x.flex.cls === 'fx-' + selFlex; });
+  if (selTypes.length) list = list.filter(function(x) {
+    return selTypes.some(function(t) { return x.cons.tag === TYPE_TAG[t]; });
+  });
+  if (selFlexs.length) list = list.filter(function(x) {
+    return selFlexs.some(function(f) { return x.flex.cls === 'fx-' + f; });
+  });
   const fixed = list.filter(function(x) { return x.cons.tag && x.cons.tag !== '柔軟'; });
   const nFixed = listAll.filter(function(x) { return x.flex.cls === 'fx-fixed'; }).length;
   const nSemi  = listAll.filter(function(x) { return x.flex.cls === 'fx-semi'; }).length;
@@ -4178,10 +4187,10 @@ async function renderData(params) {
     + '<small style="font-weight:400;color:var(--sub);font-size:12px">　うち時間帯が固定 '
     + fixed.length + '名</small></h3>';
   html += '<div class="chips" style="margin-bottom:4px">'
-    + '<a href="' + link({ flex: 'fixed' }) + '" style="background:#b3261e;color:#fff">🔒 固定 ' + nFixed + '名</a>'
-    + '<a href="' + link({ flex: 'semi' }) + '" style="background:#e8c98f;color:#6b4a06">🔁 準固定 ' + nSemi + '名</a>'
-    + '<a href="' + link({ flex: 'free' }) + '" style="background:#2e7d55;color:#fff">🔓 柔軟 ' + nFree + '名</a>'
-    + (selFlex || selType ? '<a href="' + link({ flex: '', type: '' }) + '">絞り込みを外す</a>' : '')
+    + '<a href="' + link({ flex: toggled(selFlexs, 'fixed') }) + '" style="background:#b3261e;color:#fff">🔒 固定 ' + nFixed + '名</a>'
+    + '<a href="' + link({ flex: toggled(selFlexs, 'semi') }) + '" style="background:#e8c98f;color:#6b4a06">🔁 準固定 ' + nSemi + '名</a>'
+    + '<a href="' + link({ flex: toggled(selFlexs, 'free') }) + '" style="background:#2e7d55;color:#fff">🔓 柔軟 ' + nFree + '名</a>'
+    + (selFlexs.length || selTypes.length ? '<a href="' + link({ flex: '', type: '' }) + '">絞り込みを外す</a>' : '')
     + '</div>';
   html += '<div class="tlwrap" style="padding:0"><table class="rep zebra"><thead><tr>'
     + '<th>お客様</th><th>コース</th><th>来店</th><th>主担当</th><th>担当固定</th>';
@@ -4249,7 +4258,7 @@ async function renderData(params) {
       + '<th>曜日</th><th>時間帯</th><th>予約</th><th>今の枠</th><th>提案の枠</th><th>増減</th>'
       + '<th style="text-align:left;min-width:190px">ねらい</th></tr></thead><tbody>';
     [1,2,3,4,5,6,0].forEach(function(w) {
-      if (selDow && String(w) !== selDow) return;
+      if (!hit(selDows, w)) return;
       // その曜日の持ち時間を、需要の多い順に「必要枠」まで配り直す
       let budget = 0;
       const need = {}, cur = {};
@@ -4318,7 +4327,8 @@ async function renderData(params) {
 
   // ── 実際の日付入りシフト案（翌月以降） ──────────────────────
   // 週休の日数を守りながら、取りこぼしが最も少ない週パターンを総当たりで探す
-  if (selStore && supTotal > 0) {
+  const planStore = selStores.length === 1 ? selStores[0] : '';
+  if (planStore && supTotal > 0) {
     const ymPlan = params.get('month') || addDays(today.slice(0, 8) + '28', 7).slice(0, 7);
     const planFrom = ymPlan + '-01';
     const planTo = addDays(ymPlan + '-28', 7).slice(0, 7) + '-01';
@@ -4329,7 +4339,7 @@ async function renderData(params) {
     (rosterQ || []).forEach(function(sh) {
       if (sh.kind !== 'work') return;
       if (RETIRED_STAFF.indexOf(sh.staff_name) >= 0) return;
-      if (selStore && (SHIFT_STORE_FULL[sh.store] || sh.store) !== selStore) return;
+      if (planStore && (SHIFT_STORE_FULL[sh.store] || sh.store) !== planStore) return;
       roster[sh.staff_name] = true;
     });
     const staffList = Object.keys(Object.keys(roster).length ? roster : staffSupply)
@@ -4343,7 +4353,7 @@ async function renderData(params) {
     const dim = new Date(y, mo, 0).getDate();
 
     let planHtml = '<div class="card" style="border:2px solid #8a5aa5">'
-      + '<h3>📅 ' + y + '年' + mo + '月のシフト案（' + esc(selStore) + '）</h3>';
+      + '<h3>📅 ' + y + '年' + mo + '月のシフト案（' + esc(planStore) + '）</h3>';
     const months = [1, 2, 3].map(function(n) {
       const d = new Date(Date.UTC(parseInt(today.slice(0, 4), 10), parseInt(today.slice(5, 7), 10) - 1 + n, 1));
       const s2 = d.toISOString().slice(0, 7);
@@ -4390,13 +4400,13 @@ async function renderData(params) {
         const cnt = [0,0,0,0,0,0,0]; let tot = 0;
         (shiftQ || []).forEach(function(sh) {
           if (sh.staff_name !== n || sh.kind !== 'work') return;
-          if (selStore && (SHIFT_STORE_FULL[sh.store] || sh.store) !== selStore) return;
+          if (planStore && (SHIFT_STORE_FULL[sh.store] || sh.store) !== planStore) return;
           cnt[dowOfYmd(sh.date)]++; tot++;
         });
         // 対象月のシフトも参考にする（新しく入る人は過去実績が無いため）
         (rosterQ || []).forEach(function(sh) {
           if (sh.staff_name !== n || sh.kind !== 'work') return;
-          if (selStore && (SHIFT_STORE_FULL[sh.store] || sh.store) !== selStore) return;
+          if (planStore && (SHIFT_STORE_FULL[sh.store] || sh.store) !== planStore) return;
           cnt[dowOfYmd(sh.date)]++; tot++;
         });
         dowHabit[n] = cnt.map(function(c) { return tot ? c / tot : 1 / 7; });
