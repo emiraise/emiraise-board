@@ -4319,12 +4319,26 @@ async function renderData(params) {
   // ── 実際の日付入りシフト案（翌月以降） ──────────────────────
   // 週休の日数を守りながら、取りこぼしが最も少ない週パターンを総当たりで探す
   if (selStore && supTotal > 0) {
-    const staffList = Object.keys(staffSupply).sort(function(a, b) {
-      const ia = STAFF_ORDER.indexOf(a), ib = STAFF_ORDER.indexOf(b);
-      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    const ymPlan = params.get('month') || addDays(today.slice(0, 8) + '28', 7).slice(0, 7);
+    const planFrom = ymPlan + '-01';
+    const planTo = addDays(ymPlan + '-28', 7).slice(0, 7) + '-01';
+    // 対象月のシフトに名前がある人を優先（あこさんのように途中から入る人を含めるため）
+    const rosterQ = await fetchShifts(planFrom, planTo);
+    if (stale(_seq)) return;
+    const roster = {};
+    (rosterQ || []).forEach(function(sh) {
+      if (sh.kind !== 'work') return;
+      if (RETIRED_STAFF.indexOf(sh.staff_name) >= 0) return;
+      if (selStore && (SHIFT_STORE_FULL[sh.store] || sh.store) !== selStore) return;
+      roster[sh.staff_name] = true;
     });
+    const staffList = Object.keys(Object.keys(roster).length ? roster : staffSupply)
+      .sort(function(a, b) {
+        const ia = STAFF_ORDER.indexOf(a), ib = STAFF_ORDER.indexOf(b);
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      });
     const CODE_KEYS = Object.keys(codes).sort(function(a, b) { return codeRank(a) - codeRank(b); });
-    const ym = params.get('month') || addDays(today.slice(0, 8) + '28', 7).slice(0, 7);
+    const ym = ymPlan;
     const y = parseInt(ym.slice(0, 4), 10), mo = parseInt(ym.slice(5, 7), 10);
     const dim = new Date(y, mo, 0).getDate();
 
@@ -4369,6 +4383,24 @@ async function renderData(params) {
       })(0, {});
 
       const workLimit = staffList.map(function(n) { return 7 - (WEEKLY_OFF[n] === undefined ? 2 : WEEKLY_OFF[n]); });
+      // 実績で「その人がその曜日に出ていた割合」。案が特定の曜日に偏らないよう、
+      // 同じくらい拾えるなら実績に近い曜日を選ぶ（休みが毎週同じ曜日に固定されるのを防ぐ）
+      const dowHabit = {};
+      staffList.forEach(function(n) {
+        const cnt = [0,0,0,0,0,0,0]; let tot = 0;
+        (shiftQ || []).forEach(function(sh) {
+          if (sh.staff_name !== n || sh.kind !== 'work') return;
+          if (selStore && (SHIFT_STORE_FULL[sh.store] || sh.store) !== selStore) return;
+          cnt[dowOfYmd(sh.date)]++; tot++;
+        });
+        // 対象月のシフトも参考にする（新しく入る人は過去実績が無いため）
+        (rosterQ || []).forEach(function(sh) {
+          if (sh.staff_name !== n || sh.kind !== 'work') return;
+          if (selStore && (SHIFT_STORE_FULL[sh.store] || sh.store) !== selStore) return;
+          cnt[dowOfYmd(sh.date)]++; tot++;
+        });
+        dowHabit[n] = cnt.map(function(c) { return tot ? c / tot : 1 / 7; });
+      });
       // 曜日ごと・出勤数の組み合わせごとに、最も拾える割り当てを動的計画法で選ぶ
       const DOWS = [1,2,3,4,5,6,0];
       let states = {}; states[workLimit.map(function() { return 0; }).join(',')] = { cov: 0, pick: [] };
@@ -4383,13 +4415,20 @@ async function renderData(params) {
             staffList.forEach(function(n, i) { if (o[n]) { nu[i]++; if (nu[i] > workLimit[i]) ok = false; } });
             if (!ok) return;
             const cov = st.cov + coverOf(o, hoursByCode, need[w]);
-            // 同点のときは、優先順位（D>C>B>A）の高いコードを使う案を残す
-            let rank = 0;
-            staffList.forEach(function(n) { if (o[n]) rank += codeRank(o[n]); });
+            // 同点のときは ①実績に近い曜日 ②優先順位（D>C>B>A）の高いコード を選ぶ
+            let rank = 0, habit = 0;
+            staffList.forEach(function(n) {
+              if (o[n]) { rank += codeRank(o[n]); habit += dowHabit[n][w]; }
+            });
             const nk = nu.join(',');
-            const cand = { cov: cov, rank: (st.rank || 0) + rank, pick: st.pick.concat([o]) };
+            const cand = { cov: cov, habit: (st.habit || 0) + habit,
+                           rank: (st.rank || 0) + rank, pick: st.pick.concat([o]) };
             const prev = next[nk];
-            if (!prev || prev.cov < cov || (prev.cov === cov && prev.rank > cand.rank)) next[nk] = cand;
+            const better = !prev || prev.cov < cov - 0.001
+              || (Math.abs(prev.cov - cov) <= 0.001 && prev.habit < cand.habit - 0.001)
+              || (Math.abs(prev.cov - cov) <= 0.001 && Math.abs(prev.habit - cand.habit) <= 0.001
+                  && prev.rank > cand.rank);
+            if (better) next[nk] = cand;
           });
         });
         states = next;
@@ -4399,6 +4438,33 @@ async function renderData(params) {
         .sort(function(a, b) { return b.cov - a.cov; })[0];
       const byDow = {};
       DOWS.forEach(function(w, i) { byDow[w] = best.pick[i] || {}; });
+
+      // 毎週まったく同じ曜日が休みだと単調なので、週ごとに休みを1つずらす案も作る。
+      // 週の休み日数と、その週に拾える数は変えない（＝損をしない範囲での入れ替え）
+      function rotateForWeek(k) {
+        if (k === 0) return byDow;
+        const out = {};
+        DOWS.forEach(function(w) { out[w] = Object.assign({}, byDow[w]); });
+        staffList.forEach(function(n) {
+          const offs = DOWS.filter(function(w) { return !byDow[w][n]; });
+          const ons  = DOWS.filter(function(w) { return byDow[w][n]; });
+          if (!offs.length || !ons.length) return;
+          // その週の順番で、休み↔出勤を1組だけ入れ替える
+          const offW = offs[k % offs.length];
+          const onW  = ons[(k - 1) % ons.length];
+          if (offW === onW) return;
+          // 入れ替えても拾える数が減らないときだけ実行する
+          const a1 = Object.assign({}, out[offW]); a1[n] = byDow[onW][n];
+          const a2 = Object.assign({}, out[onW]);  delete a2[n];
+          const before = coverOf(out[offW], hoursByCode, need[offW])
+                       + coverOf(out[onW],  hoursByCode, need[onW]);
+          const after  = coverOf(a1, hoursByCode, need[offW])
+                       + coverOf(a2, hoursByCode, need[onW]);
+          // 1日あたり0.5レッスンまでの差なら入れ替える（毎週同じ曜日が休みだと働きにくいため）
+          if (after >= before - 0.5) { out[offW] = a1; out[onW] = a2; }
+        });
+        return out;
+      }
 
       // その曜日に「あと1人入れたら何レッスン拾えるか」を、コード別に計算する。
       // 休みを動かしたいときの当て先として使う
@@ -4455,7 +4521,8 @@ async function renderData(params) {
         const dnum = i - lead + 1;
         const w = DOW_ORDER[i % 7];
         if (dnum < 1 || dnum > dim) { calHtml += '<div class="wkcell out"></div>'; continue; }
-        const a = byDow[w] || {};
+        const wk = Math.floor(i / 7);
+        const a = rotateForWeek(wk)[w] || {};
         let dem = 0;
         BANDS.forEach(function(b) { dem += need[w][b.key]; });
         const cov = coverOf(a, hoursByCode, need[w]);
