@@ -195,6 +195,21 @@
   .cb-pm      { background:#e3d3f0; color:#4a2a63; }
   .cb-week    { background:#cfe6ee; color:#1e4a58; }
   .cb-free    { background:#eceff0; color:#68727a; }
+  /* シフト案の週カレンダー（月〜日 × 週） */
+  .wkcal { display:grid; grid-template-columns:repeat(7,1fr); gap:5px; }
+  .wkhd { text-align:center; font-weight:800; font-size:12px; padding:4px 0;
+          background:#dde5df; border-radius:8px; }
+  .wkhd.sat { color:#2f6f9f; } .wkhd.sun { color:#b3261e; }
+  .wkcell { border:1px solid var(--line); border-radius:10px; padding:5px 6px;
+            min-height:104px; background:#fff; font-size:11px; line-height:1.45; }
+  .wkcell.out { background:#f4f6f5; opacity:.45; }
+  .wkcell.we  { background:#faf6ef; }
+  .wkday { font-weight:800; font-size:12.5px; margin-bottom:3px; }
+  .wkst  { display:flex; justify-content:space-between; gap:4px; white-space:nowrap; }
+  .wkst b { font-weight:800; }
+  .wkoff { color:#b0b8bd; }
+  .wkgap { margin-top:4px; padding-top:3px; border-top:1px dashed var(--line);
+           font-variant-numeric:tabular-nums; }
   .fx-fixed   { background:#b3261e; color:#fff; }
   .fx-semi    { background:#e8c98f; color:#6b4a06; }
   .fx-free    { background:#2e7d55; color:#fff; }
@@ -3771,6 +3786,11 @@ const BANDS = [
   { key: '夜',     label: '夜',     range: '18-21', from: 18, to: 24 },
 ];
 const DOW_LABEL = ['日', '月', '火', '水', '木', '金', '土'];
+// 「2026-11-01」から曜日を出す。'T00:00:00+09:00' を付けると UTC では前日になり
+// getUTCDay() が1日ずれるため、日付だけで判定する（2026-09-11修正）
+function dowOfYmd(ymd) {
+  return new Date(ymd + 'T00:00:00Z').getUTCDay();
+}
 function bandOf(hour) {
   for (let i = 0; i < BANDS.length; i++) {
     if (hour >= BANDS[i].from && hour < BANDS[i].to) return BANDS[i].key;
@@ -3820,14 +3840,29 @@ async function renderData(params) {
   const selBand  = params.get('band') || '';
   const selType  = params.get('type') || '';   // 傾向（朝だけ／夜だけ…）
   const selFlex  = params.get('flex') || '';   // 再現性（固定／準固定／柔軟）
+  const selRange = params.get('range') || '';   // 先月・今月・来月といった月指定
   const days = parseInt(params.get('days') || '180', 10);
 
   const today = jstToday();
-  const from = addDays(today, -days);
+  // 期間の決め方: range が指定されていればその月、無ければ直近◯日
+  function monthRange(offset) {
+    const y = parseInt(today.slice(0, 4), 10), m = parseInt(today.slice(5, 7), 10) - 1 + offset;
+    const a = new Date(Date.UTC(y, m, 1)), b = new Date(Date.UTC(y, m + 1, 1));
+    return [a.toISOString().slice(0, 10), b.toISOString().slice(0, 10)];
+  }
+  const RANGES = { last: -1, cur: 0, next: 1 };
+  let from, to2, rangeLabel;
+  if (selRange && RANGES[selRange] !== undefined) {
+    const r2 = monthRange(RANGES[selRange]);
+    from = r2[0]; to2 = r2[1];
+    rangeLabel = parseInt(from.slice(5, 7), 10) + '月';
+  } else {
+    from = addDays(today, -days); to2 = today; rangeLabel = '直近' + days + '日';
+  }
   const [resQ, custQ, shiftQ, codes] = await Promise.all([
-    fetchRange(from, today),
+    fetchRange(from, to2),
     fetchTable('crm_customers', 'merchant_id,customer_id,name,merchant_name,subscriptions'),
-    fetchShifts(from, today),
+    fetchShifts(from, to2),
     shiftCodes(),
   ]);
   if (stale(_seq)) return;
@@ -3859,7 +3894,7 @@ async function renderData(params) {
     const d = new Date(r.booking_start);
     const ymd = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(d);
     const hh = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hour12: false }).format(d), 10);
-    const wd = new Date(ymd + 'T00:00:00+09:00').getUTCDay();  // 0=日
+    const wd = dowOfYmd(ymd);  // 0=日
     const band = bandOf(hh);
     if (!band) return;
     const staff = (r.staff_names && r.staff_names[0]) || '担当なし';
@@ -3887,7 +3922,7 @@ async function renderData(params) {
 
   function link(over) {
     const q = { store: selStore, dow: selDow, staff: selStaff, band: selBand,
-                type: selType, flex: selFlex, days: String(days) };
+                type: selType, flex: selFlex, range: selRange, days: String(days) };
     Object.keys(over).forEach(function(k) { q[k] = over[k]; });
     const parts = [];
     Object.keys(q).forEach(function(k) { if (q[k] && !(k === 'days' && q[k] === '180')) parts.push(k + '=' + encodeURIComponent(q[k])); });
@@ -3904,7 +3939,8 @@ async function renderData(params) {
     return o + '</div>';
   }
 
-  let html = '<h2>📊 データ（シフト設計用）<small style="font-weight:400;color:var(--sub);font-size:12px">　直近' + days + '日・内部予定は除外</small></h2>';
+  let html = '<h2>📊 データ（シフト設計用）<small style="font-weight:400;color:var(--sub);font-size:12px">　'
+    + rangeLabel + '・内部予定は除外</small></h2>';
   const stores = STORE_ORDER_ALL.slice();
   html += chipRow('店舗', stores.map(function(x) { return { v: x, t: x }; }), selStore, 'store');
   html += chipRow('曜日', [1,2,3,4,5,6,0].map(function(w) { return { v: w, t: DOW_LABEL[w] + '曜' }; }), selDow, 'dow');
@@ -3921,8 +3957,17 @@ async function renderData(params) {
       { v: 'fixed', t: '🔒 固定（この時間しか来ない）' },
       { v: 'semi',  t: '🔁 準固定（ある程度決まっている）' },
       { v: 'free',  t: '🔓 柔軟（空きを埋められる）' }], selFlex, 'flex');
-  html += chipRow('期間', [{ v: '90', t: '90日' }, { v: '180', t: '180日' }, { v: '365', t: '1年' }],
-                  String(days) === '180' ? '' : String(days), 'days');
+  html += '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:44px">期間</span>'
+    + [['', '直近180日'], ['90', '90日'], ['365', '1年']].map(function(x) {
+        const on = !selRange && (x[0] === '' ? String(days) === '180' : String(days) === x[0]);
+        return '<a href="' + link({ days: x[0] || '180', range: '' }) + '"' + (on ? ' class="on"' : '') + '>'
+          + x[1] + '</a>';
+      }).join('')
+    + [['last', '先月'], ['cur', '今月'], ['next', '来月']].map(function(x) {
+        return '<a href="' + link({ range: x[0] }) + '"' + (selRange === x[0] ? ' class="on"' : '') + '>'
+          + x[1] + '</a>';
+      }).join('')
+    + '</div>';
 
   const totalAll = Object.keys(bandTot).reduce(function(a, k) { return a + bandTot[k]; }, 0);
   if (!totalAll) {
@@ -3978,7 +4023,7 @@ async function renderData(params) {
     if (sh.kind !== 'work') return;
     if (RETIRED_STAFF.indexOf(sh.staff_name) >= 0) return;
     if (selStaff && sh.staff_name !== selStaff) return;
-    const wd = new Date(sh.date + 'T00:00:00+09:00').getUTCDay();
+    const wd = dowOfYmd(sh.date);
     if (selDow && String(wd) !== selDow) return;
     // 店舗で絞っているときは、その店舗の勤務だけ数える
     if (selStore) {
@@ -4055,7 +4100,7 @@ async function renderData(params) {
       if (selStore && (r.store_tag || '') !== selStore) return;
       const d = new Date(r.booking_start);
       const ymd = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(d);
-      const wd = new Date(ymd + 'T00:00:00+09:00').getUTCDay();
+      const wd = dowOfYmd(ymd);
       if (selDow && String(wd) !== selDow) return;
       // シフトに出勤の記録が無い日は、持ち枠が分からないので分子からも外す
       if (!hasShift[st + '|' + ymd]) { offShift[st] = (offShift[st] || 0) + 1; return; }
@@ -4293,7 +4338,7 @@ async function renderData(params) {
       const dowDays = {};
       Object.keys(hasShift).forEach(function(k) {
         const dt = k.split('|')[1];
-        const wd = new Date(dt + 'T00:00:00+09:00').getUTCDay();
+        const wd = dowOfYmd(dt);
         (dowDays[wd] = dowDays[wd] || {})[dt] = true;
       });
       const need = {};
@@ -4386,36 +4431,45 @@ async function renderData(params) {
         });
       });
 
-      // 対象月の日付に展開
+      // 対象月を、月曜はじまりの週カレンダーに並べる
       let totDem = 0, totCov = 0;
-      let rowsHtml = '';
-      for (let d = 1; d <= dim; d++) {
-        const dt = ym + '-' + String(d).padStart(2, '0');
-        const wd = new Date(dt + 'T00:00:00+09:00').getUTCDay();
-        const a = byDow[wd] || {};
+      const DOW_ORDER = [1, 2, 3, 4, 5, 6, 0];
+      const firstDow = dowOfYmd(ym + '-01');
+      const lead = (firstDow + 6) % 7;          // 月曜まで何日戻すか
+      const cells = lead + dim;
+      const weeks = Math.ceil(cells / 7);
+      let calHtml = '<div class="wkcal">';
+      DOW_ORDER.forEach(function(w) {
+        calHtml += '<div class="wkhd' + (w === 6 ? ' sat' : w === 0 ? ' sun' : '') + '">'
+          + DOW_LABEL[w] + '</div>';
+      });
+      for (let i = 0; i < weeks * 7; i++) {
+        const dnum = i - lead + 1;
+        const w = DOW_ORDER[i % 7];
+        if (dnum < 1 || dnum > dim) { calHtml += '<div class="wkcell out"></div>'; continue; }
+        const a = byDow[w] || {};
         let dem = 0;
-        BANDS.forEach(function(b) { dem += need[wd][b.key]; });
-        const cov = coverOf(a, hoursByCode, need[wd]);
+        BANDS.forEach(function(b) { dem += need[w][b.key]; });
+        const cov = coverOf(a, hoursByCode, need[w]);
         totDem += dem; totCov += cov;
-        const wk = (wd === 0 || wd === 6);
-        rowsHtml += '<tr' + (wk ? ' style="background:#f6f1e8"' : '') + '>'
-          + '<td style="font-weight:700">' + mo + '/' + d + '</td>'
-          + '<td' + (wd === 0 ? ' style="color:#b3261e"' : wd === 6 ? ' style="color:#2f6f9f"' : '') + '>'
-          + DOW_LABEL[wd] + '</td>';
+        const gap = cov - dem;
+        calHtml += '<div class="wkcell' + (w === 0 || w === 6 ? ' we' : '') + '">'
+          + '<div class="wkday">' + mo + '/' + dnum + '</div>';
         staffList.forEach(function(n) {
           const cd = a[n];
-          const hint = !cd && swapHint[n + '|' + wd];
-          rowsHtml += '<td' + (cd ? ' style="font-weight:800"' : ' style="color:#b0b8bd"') + '>'
-            + (cd ? cd + '<br><small style="font-weight:400;color:var(--sub)">'
-                + codes[cd].start_time + '-' + codes[cd].end_time + '</small>'
-              : '休' + (hint ? '<br><small style="color:#c07a2a;font-weight:700">'
-                  + '出るなら' + hint.code + '（+' + hint.gain.toFixed(1) + '）</small>' : ''))
-            + '</td>';
+          const hint = !cd && swapHint[n + '|' + w];
+          calHtml += '<div class="wkst"><span>' + esc(n) + '</span>'
+            + (cd ? '<b title="' + codes[cd].start_time + '-' + codes[cd].end_time + '">' + cd + '</b>'
+                  : '<span class="wkoff">休</span>') + '</div>'
+            + (hint ? '<div style="color:#c07a2a;font-size:10px;text-align:right">↑' + hint.code
+                + '推奨 +' + hint.gain.toFixed(1) + '</div>' : '');
         });
-        rowsHtml += '<td>' + dem.toFixed(1) + '</td>'
-          + '<td style="font-weight:700;color:' + (cov >= dem - 0.01 ? '#2e7d55' : '#b3261e') + '">'
-            + cov.toFixed(1) + '</td></tr>';
+        calHtml += '<div class="wkgap">需要 ' + dem.toFixed(1) + ' / 受け ' + cov.toFixed(1)
+          + '<br><span style="color:' + (gap >= -0.05 ? '#2e7d55' : '#b3261e') + ';font-weight:800">'
+          + (gap >= -0.05 ? '✓ 足りる' : '不足 ' + Math.abs(gap).toFixed(1)) + '</span></div>';
+        calHtml += '</div>';
       }
+      calHtml += '</div>';
       const rate = totDem ? Math.round(totCov * 100 / totDem) : 0;
       planHtml += '<div class="chips" style="margin-top:4px">'
         + '<a style="pointer-events:none;background:' + (rate >= 95 ? '#2e7d55' : rate >= 85 ? '#c07a2a' : '#b3261e')
@@ -4430,10 +4484,7 @@ async function renderData(params) {
             return '<a style="pointer-events:none">' + esc(n) + '：週' + workLimit[i] + '日勤務（週休'
               + (7 - workLimit[i]) + '日）</a>';
           }).join('') + '</div>';
-      planHtml += '<div class="tlwrap" style="padding:0;margin-top:6px"><table class="rep zebra"><thead><tr>'
-        + '<th>日付</th><th>曜</th>'
-        + staffList.map(function(n) { return '<th>' + esc(n) + '</th>'; }).join('')
-        + '<th>見込み需要</th><th>受けられる</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
+      planHtml += '<div style="margin-top:8px">' + calHtml + '</div>';
       const hints = Object.keys(swapHint);
       if (hints.length) {
         planHtml += '<div class="mhead" style="margin-top:10px">💡 休みを動かしてもよい方への提案</div>';
@@ -4459,7 +4510,7 @@ async function renderData(params) {
             return '<b>' + cd + '</b>=' + codes[cd].start_time + '-' + codes[cd].end_time
               + (codes[cd].start2 ? '＋' + codes[cd].start2 + '-' + codes[cd].end2 : '')
               + '（' + (codes[cd].note || '') + '）'; }).join('　')
-        + '<br>直近' + days + '日の実績から曜日ごとの1日平均需要を出し、'
+        + '<br>' + rangeLabel + 'の実績から曜日ごとの1日平均需要を出し、'
         + '週休の日数を守れる組み合わせをすべて試して、最も取りこぼしが少ないパターンを選んでいます。'
         + '<b>休日は月〜日の週ごとに必ず確保</b>し、そこは崩しません。'
         + '拾える数が同じときは <b>D→C→B→A</b> の順にコードを選びます。'
