@@ -3852,7 +3852,9 @@ async function renderData(params) {
   }
   const RANGES = { last: -1, cur: 0, next: 1 };
   let from, to2, rangeLabel;
-  if (selRange && RANGES[selRange] !== undefined) {
+  if (selRange === 'all') {
+    from = '2024-01-01'; to2 = addDays(today, 92); rangeLabel = '全期間';
+  } else if (selRange && RANGES[selRange] !== undefined) {
     const r2 = monthRange(RANGES[selRange]);
     from = r2[0]; to2 = r2[1];
     rangeLabel = parseInt(from.slice(5, 7), 10) + '月';
@@ -3957,15 +3959,21 @@ async function renderData(params) {
       { v: 'fixed', t: '🔒 固定（この時間しか来ない）' },
       { v: 'semi',  t: '🔁 準固定（ある程度決まっている）' },
       { v: 'free',  t: '🔓 柔軟（空きを埋められる）' }], selFlex, 'flex');
+  // 期間の並びは大地さん指定（2026-09-11）: 全て→今月→先月→来月→90日→180日→1年
+  const RANGE_CHIPS = [
+    { range: 'all',  t: 'すべて' },
+    { range: 'cur',  t: '今月' },
+    { range: 'last', t: '先月' },
+    { range: 'next', t: '来月' },
+    { days: '90',    t: '直近90日' },
+    { days: '180',   t: '直近180日' },
+    { days: '365',   t: '1年' },
+  ];
   html += '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:44px">期間</span>'
-    + [['', '直近180日'], ['90', '90日'], ['365', '1年']].map(function(x) {
-        const on = !selRange && (x[0] === '' ? String(days) === '180' : String(days) === x[0]);
-        return '<a href="' + link({ days: x[0] || '180', range: '' }) + '"' + (on ? ' class="on"' : '') + '>'
-          + x[1] + '</a>';
-      }).join('')
-    + [['last', '先月'], ['cur', '今月'], ['next', '来月']].map(function(x) {
-        return '<a href="' + link({ range: x[0] }) + '"' + (selRange === x[0] ? ' class="on"' : '') + '>'
-          + x[1] + '</a>';
+    + RANGE_CHIPS.map(function(x) {
+        const on = x.range ? selRange === x.range : (!selRange && String(days) === x.days);
+        return '<a href="' + link(x.range ? { range: x.range } : { days: x.days, range: '' }) + '"'
+          + (on ? ' class="on"' : '') + '>' + x.t + '</a>';
       }).join('')
     + '</div>';
 
