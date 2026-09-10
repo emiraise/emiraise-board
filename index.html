@@ -4132,6 +4132,98 @@ async function renderData(params) {
     + '<b style="color:#2e7d55">🔓柔軟</b>＝いろいろな時間に来られる。<br>'
     + '「◯◯だけ」＝来店5回以上で、その時間帯に9割以上が集中している方。担当固定が90%以上の方は赤字です。'
     + 'コース欄が「—」の方は、現在有効な月謝がありません（体験のみ・休会など）</div></div>';
+  // ── シフト案（たたき台） ──────────────────────────────
+  // 考え方: ①人を増やさず時間を移すだけで取りこぼしを減らす（人件費も休日も変えない）
+  //         ②それでも足りない分だけを「増員が必要」として正直に出す
+  //         ③担当固定が強いお客様の時間帯は動かさない
+  if (supTotal > 0) {
+    const TARGET = 0.85;   // 埋まり率の目安。100%だと予約が取れない状態になる
+    // 担当固定90%以上のお客様がいる「スタッフ×時間帯」は動かさない前提にする
+    const pinned = {};
+    listAll.forEach(function(x) {
+      if (x.topPct < 90 || x.c.total < 5) return;
+      BANDS.forEach(function(b) {
+        if (x.c[b.key] >= x.c.total * 0.5) {
+          const key = x.top + '|' + b.key;
+          (pinned[key] = pinned[key] || []).push(x.c.name);
+        }
+      });
+    });
+
+    let html2 = '<div class="card" style="border:2px solid var(--accent)">'
+      + '<h3>🗓 シフト案（たたき台）</h3>';
+    let needTotal = 0, moveTotal = 0, freeTotal = 0;
+    html2 += '<div class="tlwrap" style="padding:0"><table class="rep zebra"><thead><tr>'
+      + '<th>曜日</th><th>時間帯</th><th>予約</th><th>今の枠</th><th>提案の枠</th><th>増減</th>'
+      + '<th style="text-align:left;min-width:190px">ねらい</th></tr></thead><tbody>';
+    [1,2,3,4,5,6,0].forEach(function(w) {
+      if (selDow && String(w) !== selDow) return;
+      // その曜日の持ち時間を、需要の多い順に「必要枠」まで配り直す
+      let budget = 0;
+      const need = {}, cur = {};
+      BANDS.forEach(function(b) {
+        cur[b.key] = supply[w + '|' + b.key] || 0;
+        budget += cur[b.key];
+        need[b.key] = Math.ceil((demShift[w + '|' + b.key] || 0) / TARGET);
+      });
+      if (!budget) return;
+      const order = BANDS.slice().sort(function(a, b) { return need[b.key] - need[a.key]; });
+      const plan = {};
+      let left = budget;
+      order.forEach(function(b) {
+        const give = Math.min(need[b.key], left);
+        plan[b.key] = give; left -= give;
+      });
+      // 配り切れなかった時間は、需要の多い時間帯に上乗せ（余剰の受け皿）
+      if (left > 0 && order.length) plan[order[0].key] += left;
+      let firstRow = true;
+      BANDS.forEach(function(b) {
+        const dem = demShift[w + '|' + b.key] || 0;
+        const c = Math.round(cur[b.key]), pl = Math.round(plan[b.key]);
+        const diff = pl - c;
+        if (diff > 0) moveTotal += diff; else freeTotal += -diff;
+        const shortfall = Math.max(0, need[b.key] - pl);
+        needTotal += shortfall;
+        let aim = '';
+        if (shortfall > 0) aim = '<b style="color:#b3261e">増員が必要（あと' + shortfall + '枠）</b>';
+        else if (diff > 0) aim = '<b style="color:#c07a2a">ここに厚くする</b>';
+        else if (diff < 0) aim = '<span style="color:#2e7d55">ここを薄くして回す</span>';
+        else aim = '<span style="color:var(--sub)">現状のまま</span>';
+        const pins = Object.keys(pinned).filter(function(k) { return k.split('|')[1] === b.key; });
+        if (pins.length) {
+          aim += '<br><small style="color:var(--sub)">固定客あり: '
+            + pins.map(function(k) { return esc(k.split('|')[0]); }).join('・') + '</small>';
+        }
+        html2 += '<tr>' + (firstRow ? '<td rowspan="' + BANDS.length + '" style="font-weight:800">'
+            + DOW_LABEL[w] + '曜</td>' : '')
+          + '<td style="text-align:left">' + b.label + ' <small style="color:var(--sub)">' + b.range + '</small></td>'
+          + '<td>' + dem + '</td><td>' + c + '</td>'
+          + '<td style="font-weight:800">' + pl + '</td>'
+          + '<td style="color:' + (diff > 0 ? '#c07a2a' : diff < 0 ? '#2e7d55' : '#ccc') + ';font-weight:700">'
+            + (diff > 0 ? '+' + diff : diff || '±0') + '</td>'
+          + '<td style="text-align:left">' + aim + '</td></tr>';
+        firstRow = false;
+      });
+    });
+    html2 += '</tbody></table></div>';
+    html2 += '<div class="chips" style="margin-top:6px">'
+      + '<a style="pointer-events:none;background:#c07a2a;color:#fff">厚くする ' + Math.round(moveTotal) + '枠</a>'
+      + '<a style="pointer-events:none;background:#2e7d55;color:#fff">薄くする ' + Math.round(freeTotal) + '枠</a>'
+      + (needTotal > 0
+          ? '<a style="pointer-events:none;background:#b3261e;color:#fff">増員が必要 ' + Math.round(needTotal) + '枠</a>'
+          : '<a style="pointer-events:none;background:#2e7d55;color:#fff">増員なしで足ります</a>')
+      + '</div>';
+    html2 += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
+      + '今の出勤時間の合計を変えずに、需要の多い時間帯へ配り直した案です'
+      + '（＝人件費も休日日数も変わりません）。埋まり率の目安は85%で、'
+      + '100%だと予約が取れない状態になるため余白を残しています。<br>'
+      + '<b style="color:#b3261e">「増員が必要」</b>は、配り直しても足りない分です。'
+      + 'ここだけが人を増やすか、営業時間を延ばすかの判断になります。<br>'
+      + '「固定客あり」は担当固定90%以上のお客様がいる時間帯です。'
+      + 'そのスタッフをその時間帯から外すと、来店が止まるおそれがあります</div></div>';
+    html += html2;
+  }
+
   if (stale(_seq)) return;
   app.innerHTML = html;
 }
