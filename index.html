@@ -3722,6 +3722,38 @@ async function renderTrial() {
 
 
 
+// 週の休み日数（既定は週休2日。大地さん指定: ゆきさんは週休3日・2026-09-11）
+const WEEKLY_OFF = { 'ゆき': 3 };
+// 勤務コードごとの、時間帯への割り当て時間（1時間＝1レッスン）
+function codeBandHours(codes, code) {
+  const c = codes[code];
+  const out = {};
+  BANDS.forEach(function(b) { out[b.key] = 0; });
+  if (!c) return out;
+  function hm(t) { return parseInt(t.slice(0, 2), 10) + (t.slice(3, 5) === '30' ? 0.5 : 0); }
+  const ranges = [[hm(c.start_time), hm(c.end_time)]];
+  if (c.start2 && c.end2) ranges.push([hm(c.start2), hm(c.end2)]);
+  BANDS.forEach(function(b) {
+    ranges.forEach(function(r) {
+      const a = Math.max(r[0], b.from), z = Math.min(r[1], Math.min(b.to, 21));
+      if (z > a) out[b.key] += z - a;
+    });
+  });
+  return out;
+}
+// 1日の割り当て（誰がどのコードで出るか）に対して、その曜日の需要をどれだけ拾えるか
+function coverOf(assign, hoursByCode, need) {
+  let cov = 0, cap = {};
+  BANDS.forEach(function(b) { cap[b.key] = 0; });
+  Object.keys(assign).forEach(function(n) {
+    const cd = assign[n];
+    if (!cd) return;
+    BANDS.forEach(function(b) { cap[b.key] += hoursByCode[cd][b.key]; });
+  });
+  BANDS.forEach(function(b) { cov += Math.min(need[b.key] || 0, cap[b.key]); });
+  return cov;
+}
+
 // ── データ（シフト設計用の分析／全スタッフ閲覧可） ─────────────
 // 時間帯の区切りは大地さんの指定（2026-09-11）。名前もそのまま使う
 const BANDS = [
@@ -4222,6 +4254,142 @@ async function renderData(params) {
       + '「固定客あり」は担当固定90%以上のお客様がいる時間帯です。'
       + 'そのスタッフをその時間帯から外すと、来店が止まるおそれがあります</div></div>';
     html += html2;
+  }
+
+  // ── 実際の日付入りシフト案（翌月以降） ──────────────────────
+  // 週休の日数を守りながら、取りこぼしが最も少ない週パターンを総当たりで探す
+  if (selStore && supTotal > 0) {
+    const staffList = Object.keys(staffSupply).sort(function(a, b) {
+      const ia = STAFF_ORDER.indexOf(a), ib = STAFF_ORDER.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    const CODE_KEYS = Object.keys(codes).sort();
+    const ym = params.get('month') || addDays(today.slice(0, 8) + '28', 7).slice(0, 7);
+    const y = parseInt(ym.slice(0, 4), 10), mo = parseInt(ym.slice(5, 7), 10);
+    const dim = new Date(y, mo, 0).getDate();
+
+    let planHtml = '<div class="card" style="border:2px solid #8a5aa5">'
+      + '<h3>📅 ' + y + '年' + mo + '月のシフト案（' + esc(selStore) + '）</h3>';
+    const months = [1, 2, 3].map(function(n) {
+      const d = new Date(Date.UTC(parseInt(today.slice(0, 4), 10), parseInt(today.slice(5, 7), 10) - 1 + n, 1));
+      const s2 = d.toISOString().slice(0, 7);
+      return '<a href="' + link({ month: s2 }) + '"' + (s2 === ym ? ' class="on"' : '') + '>'
+        + (d.getUTCMonth() + 1) + '月</a>';
+    }).join('');
+    planHtml += '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px">対象月</span>' + months + '</div>';
+
+    if (staffList.length === 0 || staffList.length > 3) {
+      planHtml += '<div class="empty">この店舗のスタッフが' + staffList.length + '名のため、案を出せません（1〜3名が対象）</div></div>';
+      html += planHtml;
+    } else {
+      // 曜日ごとの「1日あたり平均需要」
+      const dowDays = {};
+      Object.keys(hasShift).forEach(function(k) {
+        const dt = k.split('|')[1];
+        const wd = new Date(dt + 'T00:00:00+09:00').getUTCDay();
+        (dowDays[wd] = dowDays[wd] || {})[dt] = true;
+      });
+      const need = {};
+      [0,1,2,3,4,5,6].forEach(function(w) {
+        const n = Object.keys(dowDays[w] || {}).length || 1;
+        need[w] = {};
+        BANDS.forEach(function(b) { need[w][b.key] = (demShift[w + '|' + b.key] || 0) / n; });
+      });
+      const hoursByCode = {};
+      CODE_KEYS.forEach(function(cd) { hoursByCode[cd] = codeBandHours(codes, cd); });
+
+      // 1日の割り当て候補（各スタッフ: 休み or 各コード）
+      const opts = [];
+      (function build(i, cur) {
+        if (i === staffList.length) { opts.push(Object.assign({}, cur)); return; }
+        cur[staffList[i]] = '';
+        build(i + 1, cur);
+        CODE_KEYS.forEach(function(cd) { cur[staffList[i]] = cd; build(i + 1, cur); });
+        delete cur[staffList[i]];
+      })(0, {});
+
+      const workLimit = staffList.map(function(n) { return 7 - (WEEKLY_OFF[n] === undefined ? 2 : WEEKLY_OFF[n]); });
+      // 曜日ごと・出勤数の組み合わせごとに、最も拾える割り当てを動的計画法で選ぶ
+      const DOWS = [1,2,3,4,5,6,0];
+      let states = {}; states[workLimit.map(function() { return 0; }).join(',')] = { cov: 0, pick: [] };
+      DOWS.forEach(function(w) {
+        const next = {};
+        Object.keys(states).forEach(function(key) {
+          const used = key.split(',').map(Number);
+          const st = states[key];
+          opts.forEach(function(o) {
+            const nu = used.slice();
+            let ok = true;
+            staffList.forEach(function(n, i) { if (o[n]) { nu[i]++; if (nu[i] > workLimit[i]) ok = false; } });
+            if (!ok) return;
+            const cov = st.cov + coverOf(o, hoursByCode, need[w]);
+            const nk = nu.join(',');
+            if (!next[nk] || next[nk].cov < cov) next[nk] = { cov: cov, pick: st.pick.concat([o]) };
+          });
+        });
+        states = next;
+      });
+      const goal = workLimit.join(',');
+      const best = states[goal] || Object.keys(states).map(function(k) { return states[k]; })
+        .sort(function(a, b) { return b.cov - a.cov; })[0];
+      const byDow = {};
+      DOWS.forEach(function(w, i) { byDow[w] = best.pick[i] || {}; });
+
+      // 対象月の日付に展開
+      let totDem = 0, totCov = 0;
+      let rowsHtml = '';
+      for (let d = 1; d <= dim; d++) {
+        const dt = ym + '-' + String(d).padStart(2, '0');
+        const wd = new Date(dt + 'T00:00:00+09:00').getUTCDay();
+        const a = byDow[wd] || {};
+        let dem = 0;
+        BANDS.forEach(function(b) { dem += need[wd][b.key]; });
+        const cov = coverOf(a, hoursByCode, need[wd]);
+        totDem += dem; totCov += cov;
+        const wk = (wd === 0 || wd === 6);
+        rowsHtml += '<tr' + (wk ? ' style="background:#f6f1e8"' : '') + '>'
+          + '<td style="font-weight:700">' + mo + '/' + d + '</td>'
+          + '<td' + (wd === 0 ? ' style="color:#b3261e"' : wd === 6 ? ' style="color:#2f6f9f"' : '') + '>'
+          + DOW_LABEL[wd] + '</td>';
+        staffList.forEach(function(n) {
+          const cd = a[n];
+          rowsHtml += '<td' + (cd ? ' style="font-weight:800"' : ' style="color:#b0b8bd"') + '>'
+            + (cd ? cd + '<br><small style="font-weight:400;color:var(--sub)">'
+                + codes[cd].start_time + '-' + codes[cd].end_time + '</small>' : '休') + '</td>';
+        });
+        rowsHtml += '<td>' + dem.toFixed(1) + '</td>'
+          + '<td style="font-weight:700;color:' + (cov >= dem - 0.01 ? '#2e7d55' : '#b3261e') + '">'
+            + cov.toFixed(1) + '</td></tr>';
+      }
+      const rate = totDem ? Math.round(totCov * 100 / totDem) : 0;
+      planHtml += '<div class="chips" style="margin-top:4px">'
+        + '<a style="pointer-events:none;background:' + (rate >= 95 ? '#2e7d55' : rate >= 85 ? '#c07a2a' : '#b3261e')
+        + ';color:#fff">カバー率 ' + rate + '%</a>'
+        + '<a style="pointer-events:none">見込み需要 ' + Math.round(totDem) + 'レッスン</a>'
+        + '<a style="pointer-events:none">受けられる ' + Math.round(totCov) + 'レッスン</a>'
+        + (totDem - totCov >= 1 ? '<a style="pointer-events:none;background:#b3261e;color:#fff">取りこぼし '
+            + Math.round(totDem - totCov) + 'レッスン</a>' : '')
+        + '</div>';
+      planHtml += '<div class="chips" style="margin-top:2px">'
+        + staffList.map(function(n, i) {
+            return '<a style="pointer-events:none">' + esc(n) + '：週' + workLimit[i] + '日勤務（週休'
+              + (7 - workLimit[i]) + '日）</a>';
+          }).join('') + '</div>';
+      planHtml += '<div class="tlwrap" style="padding:0;margin-top:6px"><table class="rep zebra"><thead><tr>'
+        + '<th>日付</th><th>曜</th>'
+        + staffList.map(function(n) { return '<th>' + esc(n) + '</th>'; }).join('')
+        + '<th>見込み需要</th><th>受けられる</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
+      planHtml += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
+        + '勤務コード：' + CODE_KEYS.map(function(cd) {
+            return '<b>' + cd + '</b>=' + codes[cd].start_time + '-' + codes[cd].end_time
+              + (codes[cd].start2 ? '＋' + codes[cd].start2 + '-' + codes[cd].end2 : '')
+              + '（' + (codes[cd].note || '') + '）'; }).join('　')
+        + '<br>直近' + days + '日の実績から曜日ごとの1日平均需要を出し、'
+        + '週休の日数を守れる組み合わせをすべて試して、最も取りこぼしが少ないパターンを選んでいます。'
+        + '<b>そのまま使う案ではなく、たたき台</b>としてご覧ください。'
+        + '本人の希望休や研修・他店応援は入っていません</div></div>';
+      html += planHtml;
+    }
   }
 
   if (stale(_seq)) return;
