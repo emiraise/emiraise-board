@@ -195,6 +195,10 @@
   .cb-pm      { background:#e3d3f0; color:#4a2a63; }
   .cb-week    { background:#cfe6ee; color:#1e4a58; }
   .cb-free    { background:#eceff0; color:#68727a; }
+  .fx-fixed   { background:#b3261e; color:#fff; }
+  .fx-semi    { background:#e8c98f; color:#6b4a06; }
+  .fx-free    { background:#2e7d55; color:#fff; }
+  .fx-unknown { background:#eceff0; color:#9aa3a9; }
   .compass { font-weight:800; font-size:12.5px; letter-spacing:.06em; color:#7a5c1e; background:linear-gradient(135deg, #f3e7c8, #e8d5a3); padding:6px 13px; border-radius:999px; text-decoration:none; box-shadow:2px 2px 5px var(--sd, rgba(0,0,0,.12)), -2px -2px 5px var(--sl, rgba(255,255,255,.7)); margin-left:10px; white-space:nowrap; }
   .compass:hover { filter:brightness(1.04); }
   .compass.on { box-shadow:inset 2px 2px 5px rgba(122,92,30,.3); }
@@ -1645,6 +1649,11 @@ function blocksFor(blocks, staffName, dateStr) {
 }
 // スタッフの表示順（2026-08-28 大地指示・全ビュー共通）
 const STAFF_ORDER = ['林　大地', '齋藤 良気', 'こうじ', 'あやな', 'ねね', 'まこ', 'まゆ', 'ゆうか', 'ゆき', 'なおみ', 'ももか'];
+// 退職者。シフト表に名前が残っていても分析には出さない（2026-09-11 大地さん指示）
+const RETIRED_STAFF = ['みわ'];
+// シフト表の店舗表記 → ボード上の店舗名
+const SHIFT_STORE_FULL = { '本店': '金沢本店', '駅西': '金沢駅西店', '富山東': '富山東店',
+                           '福井高柳': '福井高柳店', '天王寺': '天王寺店' };
 function staffRank(name) {
   const i = STAFF_ORDER.findIndex(function(x) { return nw(x) === nw(name); });
   return i < 0 ? 99 : i;
@@ -3729,6 +3738,28 @@ function bandOf(hour) {
   }
   return '';
 }
+// 予約の再現性（どれくらい時間帯が決まっているか）を3段階で表す。
+// 大地さんの言う「この時間しか来られない／ある程度決まっているが対応可／いつでも可」
+function flexOf(c) {
+  const n = c.total;
+  if (n < 5) return { tag: '—', cls: 'fx-unknown', note: '来店5回未満', score: null };
+  let top = 0, used = 0;
+  BANDS.forEach(function(b) { if (c[b.key] > top) top = c[b.key]; if (c[b.key] > 0) used++; });
+  const pct = Math.round(top * 100 / n);
+  if (pct >= 70) return { tag: '🔒 固定', cls: 'fx-fixed', score: pct,
+    note: 'この時間しか予約が入らない（再現性が高い）' };
+  if (pct >= 45 || used <= 3) return { tag: '🔁 準固定', cls: 'fx-semi', score: pct,
+    note: 'ある程度決まっているが、他の時間にも対応できる' };
+  return { tag: '🔓 柔軟', cls: 'fx-free', score: pct, note: 'いろいろな時間に来られる' };
+}
+// 曜日の固定度。シフトを動かすときに「何曜日が動かせないか」を見る
+function dowFixOf(c) {
+  const n = c.total;
+  if (n < 5) return { pct: null, top: '' };
+  let best = -1, bi = 0;
+  for (let w = 0; w < 7; w++) { if ((c.dow[w] || 0) > best) { best = c.dow[w] || 0; bi = w; } }
+  return { pct: Math.round(best * 100 / n), top: DOW_LABEL[bi] };
+}
 // 時間帯が偏っているお客様を「◯◯しか来られない方」として分類する
 function constraintOf(c) {
   const n = c.total;
@@ -3752,9 +3783,11 @@ async function renderData(params) {
 
   const today = jstToday();
   const from = addDays(today, -days);
-  const [resQ, custQ] = await Promise.all([
+  const [resQ, custQ, shiftQ, codes] = await Promise.all([
     fetchRange(from, today),
     fetchTable('crm_customers', 'merchant_id,customer_id,name,merchant_name,subscriptions'),
+    fetchShifts(from, today),
+    shiftCodes(),
   ]);
   if (stale(_seq)) return;
   if (resQ.error || custQ.error) {
@@ -3789,6 +3822,7 @@ async function renderData(params) {
     const band = bandOf(hh);
     if (!band) return;
     const staff = (r.staff_names && r.staff_names[0]) || '担当なし';
+    if (RETIRED_STAFF.indexOf(staff) >= 0) return;
     staffSet[staff] = true;
     if (selStore && (r.store_tag || '') !== selStore) return;
     if (selDow && String(wd) !== selDow) return;
@@ -3801,8 +3835,8 @@ async function renderData(params) {
     const k = nameKey(r.customer_name);
     if (!k) return;
     const c = cust[k] || (cust[k] = { name: r.customer_name, total: 0, weekend: 0, staff: {},
-      朝: 0, 昼: 0, 昼過ぎ: 0, 夕方: 0, 夜: 0, stores: {} });
-    c.total++; c[band]++;
+      朝: 0, 昼: 0, 昼過ぎ: 0, 夕方: 0, 夜: 0, stores: {}, dow: [0,0,0,0,0,0,0] });
+    c.total++; c[band]++; c.dow[wd]++;
     if (wd === 0 || wd === 6) c.weekend++;
     c.staff[staff] = (c.staff[staff] || 0) + 1;
     c.stores[r.store_tag || ''] = true;
@@ -3867,23 +3901,146 @@ async function renderData(params) {
   html += '<td>' + totalAll + '</td></tr></tbody></table></div>';
   html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">色が濃いほど予約が多い時間帯です。曜日や担当で絞ると、その条件での山が見えます</div></div>';
 
+  // ── 供給（出勤しているスタッフの持ち時間）を曜日×時間帯で数える ──
+  // シフトのコード（A=8:30-17:30 等）と時間帯の重なりを、1時間=1枠として積む
+  function overlapHours(from1, to1, from2, to2) {
+    const a = Math.max(from1, from2), b = Math.min(to1, to2);
+    return b > a ? b - a : 0;
+  }
+  function codeRanges(sh) {
+    const c = codes[sh.code];
+    if (!c) return sh.kind === 'work' ? [[9, 21]] : [];   // コード不明は営業時間ぶん
+    const out = [[parseFloat(c.start_time.slice(0, 2)) + (c.start_time.slice(3, 5) === '30' ? 0.5 : 0),
+                  parseFloat(c.end_time.slice(0, 2)) + (c.end_time.slice(3, 5) === '30' ? 0.5 : 0)]];
+    if (c.start2 && c.end2) {
+      out.push([parseFloat(c.start2.slice(0, 2)) + (c.start2.slice(3, 5) === '30' ? 0.5 : 0),
+                parseFloat(c.end2.slice(0, 2)) + (c.end2.slice(3, 5) === '30' ? 0.5 : 0)]);
+    }
+    return out;
+  }
+  const supply = {}, staffSupply = {};
+  (shiftQ || []).forEach(function(sh) {
+    if (sh.kind !== 'work') return;
+    if (RETIRED_STAFF.indexOf(sh.staff_name) >= 0) return;
+    if (selStaff && sh.staff_name !== selStaff) return;
+    const wd = new Date(sh.date + 'T00:00:00+09:00').getUTCDay();
+    if (selDow && String(wd) !== selDow) return;
+    // 店舗で絞っているときは、その店舗の勤務だけ数える
+    if (selStore) {
+      const st = SHIFT_STORE_FULL[sh.store] || sh.store || '';
+      if (st && st !== selStore) return;
+      if (!st) return;
+    }
+    const ranges = codeRanges(sh);
+    BANDS.forEach(function(b) {
+      if (selBand && b.key !== selBand) return;
+      let h = 0;
+      ranges.forEach(function(r) { h += overlapHours(r[0], r[1], b.from, Math.min(b.to, 21)); });
+      if (h <= 0) return;
+      supply[wd + '|' + b.key] = (supply[wd + '|' + b.key] || 0) + h;
+      staffSupply[sh.staff_name] = (staffSupply[sh.staff_name] || 0) + h;
+    });
+  });
+
+  const supTotal = Object.keys(supply).reduce(function(a, k) { return a + supply[k]; }, 0);
+  if (supTotal > 0) {
+    html += '<div class="card"><h3>需要と供給のギャップ<small style="font-weight:400;color:var(--sub);font-size:12px">'
+      + '　供給＝出勤しているスタッフの持ち時間（1時間＝1枠）</small></h3>';
+    html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr><th>曜日</th>';
+    BANDS.forEach(function(b) { html += '<th>' + b.label + '<br><small style="font-weight:400">' + b.range + '</small></th>'; });
+    html += '</tr></thead><tbody>';
+    [1,2,3,4,5,6,0].forEach(function(w) {
+      if (selDow && String(w) !== selDow) return;
+      html += '<tr><td>' + DOW_LABEL[w] + '曜</td>';
+      BANDS.forEach(function(b) {
+        if (selBand && b.key !== selBand) { html += '<td style="color:#ccc">·</td>'; return; }
+        const dem = grid[w + '|' + b.key] || 0;
+        const sup = supply[w + '|' + b.key] || 0;
+        if (!sup && !dem) { html += '<td style="color:#ccc">·</td>'; return; }
+        const rate = sup ? Math.round(dem * 100 / sup) : 999;
+        const col = rate >= 85 ? '#b3261e' : rate >= 60 ? '#c07a2a' : rate >= 30 ? '#2e7d55' : '#7a8a92';
+        html += '<td><span style="color:' + col + ';font-weight:800">' + (sup ? rate + '%' : '枠なし') + '</span>'
+          + '<br><small style="color:var(--sub)">' + dem + ' / ' + Math.round(sup) + '枠</small></td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+    html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
+      + '<b style="color:#b3261e">85%以上</b>＝ほぼ満席で予約が取れない　'
+      + '<b style="color:#c07a2a">60〜85%</b>＝ちょうど良い　'
+      + '<b style="color:#2e7d55">30〜60%</b>＝余裕あり　'
+      + '<b style="color:#7a8a92">30%未満</b>＝人を減らせる余地。'
+      + '「枠なし」は需要はあるのに出勤がない時間帯です</div></div>';
+
+    // スタッフ別の埋まり率
+    const byStaff = {};
+    rows.forEach(function(r) {
+      const st = (r.staff_names && r.staff_names[0]) || '担当なし';
+      if (RETIRED_STAFF.indexOf(st) >= 0) return;
+      if (selStore && (r.store_tag || '') !== selStore) return;
+      const d = new Date(r.booking_start);
+      const ymd = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(d);
+      const wd = new Date(ymd + 'T00:00:00+09:00').getUTCDay();
+      if (selDow && String(wd) !== selDow) return;
+      const hh = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hour12: false }).format(d), 10);
+      const bd = bandOf(hh);
+      if (!bd) return;
+      if (selBand && bd !== selBand) return;
+      if (selStaff && st !== selStaff) return;
+      byStaff[st] = (byStaff[st] || 0) + 1;
+    });
+    const names = Object.keys(staffSupply).sort(function(a, b) {
+      const ra = staffSupply[a] ? (byStaff[a] || 0) / staffSupply[a] : 0;
+      const rb = staffSupply[b] ? (byStaff[b] || 0) / staffSupply[b] : 0;
+      return rb - ra;
+    });
+    if (names.length) {
+      html += '<div class="card"><h3>スタッフ別の埋まり率</h3>';
+      html += '<div class="tlwrap" style="padding:0"><table class="rep zebra"><thead><tr>'
+        + '<th>スタッフ</th><th>レッスン</th><th>出勤の持ち枠</th><th>埋まり率</th><th style="min-width:160px">　</th></tr></thead><tbody>';
+      names.forEach(function(n) {
+        const les = byStaff[n] || 0, sup = staffSupply[n] || 0;
+        const rate = sup ? Math.round(les * 100 / sup) : 0;
+        const col = rate >= 85 ? '#b3261e' : rate >= 60 ? '#c07a2a' : rate >= 30 ? '#2e7d55' : '#7a8a92';
+        html += '<tr><td>' + esc(n) + '</td><td>' + les + '</td><td>' + Math.round(sup) + '枠</td>'
+          + '<td style="color:' + col + ';font-weight:800">' + rate + '%</td>'
+          + '<td><div style="background:#e6ebe8;border-radius:6px;height:10px;overflow:hidden">'
+          + '<div style="width:' + Math.min(100, rate) + '%;height:100%;background:' + col + '"></div></div></td></tr>';
+      });
+      html += '</tbody></table></div>';
+      html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
+        + '出勤の持ち枠＝シフトの勤務時間（A/B/C/D）から算出した1時間単位の受け入れ可能数。'
+        + '担当が別店舗の応援に入った日も、その店舗で絞れば分けて見られます</div></div>';
+    }
+  }
+
   // お客様別の内訳
   const list = Object.keys(cust).map(function(k) {
     const c = cust[k];
     const top = Object.keys(c.staff).sort(function(a, b) { return c.staff[b] - c.staff[a]; })[0] || '—';
     const m = memberOf[k];
     return { k: k, c: c, top: top, topPct: Math.round(c.staff[top] * 100 / c.total),
-             quota: m ? m.quota : 0, member: !!m, cons: constraintOf(c) };
+             quota: m ? m.quota : 0, member: !!m, cons: constraintOf(c),
+             flex: flexOf(c), dowFix: dowFixOf(c) };
   }).sort(function(a, b) { return b.c.total - a.c.total; });
 
   const fixed = list.filter(function(x) { return x.cons.tag && x.cons.tag !== '柔軟'; });
+  const nFixed = list.filter(function(x) { return x.flex.cls === 'fx-fixed'; }).length;
+  const nSemi  = list.filter(function(x) { return x.flex.cls === 'fx-semi'; }).length;
+  const nFree  = list.filter(function(x) { return x.flex.cls === 'fx-free'; }).length;
   html += '<div class="card"><h3>お客様別の時間帯（' + list.length + '名）'
-    + '<small style="font-weight:400;color:var(--sub);font-size:12px">　うち時間帯が固定されている方 '
+    + '<small style="font-weight:400;color:var(--sub);font-size:12px">　うち時間帯が固定 '
     + fixed.length + '名</small></h3>';
+  html += '<div class="chips" style="margin-bottom:4px">'
+    + '<a style="pointer-events:none;background:#b3261e;color:#fff">🔒 固定 ' + nFixed + '名</a>'
+    + '<a style="pointer-events:none;background:#e8c98f;color:#6b4a06">🔁 準固定 ' + nSemi + '名</a>'
+    + '<a style="pointer-events:none;background:#2e7d55;color:#fff">🔓 柔軟 ' + nFree + '名</a>'
+    + '</div>';
   html += '<div class="tlwrap" style="padding:0"><table class="rep zebra"><thead><tr>'
     + '<th>お客様</th><th>コース</th><th>来店</th><th>主担当</th><th>担当固定</th>';
   BANDS.forEach(function(b) { html += '<th>' + b.label + '</th>'; });
-  html += '<th>土日</th><th style="min-width:120px">傾向</th></tr></thead><tbody>';
+  html += '<th>土日</th><th style="min-width:110px">再現性</th><th>よく来る曜日</th>'
+    + '<th style="min-width:120px">傾向</th></tr></thead><tbody>';
   list.forEach(function(x) {
     const c = x.c;
     html += '<tr><td>' + esc(c.name) + '</td>'
@@ -3896,11 +4053,18 @@ async function renderData(params) {
       html += '<td' + (n ? ' style="font-weight:700"' : ' style="color:#ccc"') + '>' + (n || '·') + '</td>';
     });
     html += '<td>' + (c.weekend || '·') + '</td>'
+      + '<td style="text-align:left"><span class="pill ' + x.flex.cls + '" title="' + esc(x.flex.note) + '">'
+        + x.flex.tag + (x.flex.score !== null ? ' ' + x.flex.score + '%' : '') + '</span></td>'
+      + '<td>' + (x.dowFix.pct !== null ? esc(x.dowFix.top) + ' ' + x.dowFix.pct + '%' : '·') + '</td>'
       + '<td style="text-align:left">' + (x.cons.tag ? '<span class="pill ' + (x.cons.cls || '') + '">' + x.cons.tag + '</span>'
           : '<span style="color:var(--sub);font-size:11px">' + esc(x.cons.note || '') + '</span>') + '</td></tr>';
   });
   html += '</tbody></table></div>';
   html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
+    + '<b>再現性</b>＝最も多い時間帯が全体に占める割合。'
+    + '<b style="color:#b3261e">🔒固定(70%以上)</b>＝この時間しか予約が入らない／'
+    + '<b style="color:#8a6a1e">🔁準固定(45〜70%)</b>＝ある程度決まっているが対応可／'
+    + '<b style="color:#2e7d55">🔓柔軟</b>＝いろいろな時間に来られる。<br>'
     + '「◯◯だけ」＝来店5回以上で、その時間帯に9割以上が集中している方。担当固定が90%以上の方は赤字です。'
     + 'コース欄が「—」の方は、現在有効な月謝がありません（体験のみ・休会など）</div></div>';
   if (stale(_seq)) return;
