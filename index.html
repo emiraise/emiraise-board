@@ -3779,6 +3779,8 @@ async function renderData(params) {
   const selDow   = params.get('dow') || '';
   const selStaff = params.get('staff') || '';
   const selBand  = params.get('band') || '';
+  const selType  = params.get('type') || '';   // 傾向（朝だけ／夜だけ…）
+  const selFlex  = params.get('flex') || '';   // 再現性（固定／準固定／柔軟）
   const days = parseInt(params.get('days') || '180', 10);
 
   const today = jstToday();
@@ -3843,7 +3845,8 @@ async function renderData(params) {
   });
 
   function link(over) {
-    const q = { store: selStore, dow: selDow, staff: selStaff, band: selBand, days: String(days) };
+    const q = { store: selStore, dow: selDow, staff: selStaff, band: selBand,
+                type: selType, flex: selFlex, days: String(days) };
     Object.keys(over).forEach(function(k) { q[k] = over[k]; });
     const parts = [];
     Object.keys(q).forEach(function(k) { if (q[k] && !(k === 'days' && q[k] === '180')) parts.push(k + '=' + encodeURIComponent(q[k])); });
@@ -3869,6 +3872,14 @@ async function renderData(params) {
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b, 'ja');
     }).map(function(x) { return { v: x, t: x }; }), selStaff, 'staff');
   html += chipRow('時間帯', BANDS.map(function(b) { return { v: b.key, t: b.label + ' ' + b.range }; }), selBand, 'band');
+  html += chipRow('傾向', [
+      { v: '朝', t: '🌅 朝だけ' }, { v: '午前昼', t: '☀️ 午前〜昼のみ' },
+      { v: '夕方以降', t: '🌆 夕方以降のみ' }, { v: '夜', t: '🌙 夜だけ' },
+      { v: '土日', t: '🗓 土日のみ' }], selType, 'type');
+  html += chipRow('再現性', [
+      { v: 'fixed', t: '🔒 固定（この時間しか来ない）' },
+      { v: 'semi',  t: '🔁 準固定（ある程度決まっている）' },
+      { v: 'free',  t: '🔓 柔軟（空きを埋められる）' }], selFlex, 'flex');
   html += chipRow('期間', [{ v: '90', t: '90日' }, { v: '180', t: '180日' }, { v: '365', t: '1年' }],
                   String(days) === '180' ? '' : String(days), 'days');
 
@@ -3943,6 +3954,13 @@ async function renderData(params) {
   });
 
   const supTotal = Object.keys(supply).reduce(function(a, k) { return a + supply[k]; }, 0);
+  if (!supTotal) {
+    // シフト表が同期されていない店舗（天王寺＝ワンモアなど）は供給が出せない
+    html += '<div class="mhead warn">この条件ではシフト（出勤）のデータが無いため、'
+      + '需要と供給のギャップは出せません。'
+      + (selStore === '天王寺店' ? '天王寺店はシフト表が連携されていません' : '条件をゆるめてお試しください')
+      + '</div>';
+  }
   if (supTotal > 0) {
     html += '<div class="card"><h3>需要と供給のギャップ<small style="font-weight:400;color:var(--sub);font-size:12px">'
       + '　供給＝出勤しているスタッフの持ち時間（1時間＝1枠）</small></h3>';
@@ -4015,7 +4033,7 @@ async function renderData(params) {
   }
 
   // お客様別の内訳
-  const list = Object.keys(cust).map(function(k) {
+  let list = Object.keys(cust).map(function(k) {
     const c = cust[k];
     const top = Object.keys(c.staff).sort(function(a, b) { return c.staff[b] - c.staff[a]; })[0] || '—';
     const m = memberOf[k];
@@ -4024,23 +4042,34 @@ async function renderData(params) {
              flex: flexOf(c), dowFix: dowFixOf(c) };
   }).sort(function(a, b) { return b.c.total - a.c.total; });
 
+  // 傾向・再現性での絞り込み（「夕方だけ来る人」「空きを埋められる人」を直接引くため）
+  const TYPE_TAG = { '朝': '🌅 朝だけ', '午前昼': '☀️ 午前〜昼のみ', '夕方以降': '🌆 夕方以降のみ',
+                     '夜': '🌙 夜だけ', '土日': '🗓 土日のみ' };
+  const listAll = list;
+  if (selType) list = list.filter(function(x) { return x.cons.tag === TYPE_TAG[selType]; });
+  if (selFlex) list = list.filter(function(x) { return x.flex.cls === 'fx-' + selFlex; });
   const fixed = list.filter(function(x) { return x.cons.tag && x.cons.tag !== '柔軟'; });
-  const nFixed = list.filter(function(x) { return x.flex.cls === 'fx-fixed'; }).length;
-  const nSemi  = list.filter(function(x) { return x.flex.cls === 'fx-semi'; }).length;
-  const nFree  = list.filter(function(x) { return x.flex.cls === 'fx-free'; }).length;
+  const nFixed = listAll.filter(function(x) { return x.flex.cls === 'fx-fixed'; }).length;
+  const nSemi  = listAll.filter(function(x) { return x.flex.cls === 'fx-semi'; }).length;
+  const nFree  = listAll.filter(function(x) { return x.flex.cls === 'fx-free'; }).length;
   html += '<div class="card"><h3>お客様別の時間帯（' + list.length + '名）'
     + '<small style="font-weight:400;color:var(--sub);font-size:12px">　うち時間帯が固定 '
     + fixed.length + '名</small></h3>';
   html += '<div class="chips" style="margin-bottom:4px">'
-    + '<a style="pointer-events:none;background:#b3261e;color:#fff">🔒 固定 ' + nFixed + '名</a>'
-    + '<a style="pointer-events:none;background:#e8c98f;color:#6b4a06">🔁 準固定 ' + nSemi + '名</a>'
-    + '<a style="pointer-events:none;background:#2e7d55;color:#fff">🔓 柔軟 ' + nFree + '名</a>'
+    + '<a href="' + link({ flex: 'fixed' }) + '" style="background:#b3261e;color:#fff">🔒 固定 ' + nFixed + '名</a>'
+    + '<a href="' + link({ flex: 'semi' }) + '" style="background:#e8c98f;color:#6b4a06">🔁 準固定 ' + nSemi + '名</a>'
+    + '<a href="' + link({ flex: 'free' }) + '" style="background:#2e7d55;color:#fff">🔓 柔軟 ' + nFree + '名</a>'
+    + (selFlex || selType ? '<a href="' + link({ flex: '', type: '' }) + '">絞り込みを外す</a>' : '')
     + '</div>';
   html += '<div class="tlwrap" style="padding:0"><table class="rep zebra"><thead><tr>'
     + '<th>お客様</th><th>コース</th><th>来店</th><th>主担当</th><th>担当固定</th>';
   BANDS.forEach(function(b) { html += '<th>' + b.label + '</th>'; });
   html += '<th>土日</th><th style="min-width:110px">再現性</th><th>よく来る曜日</th>'
     + '<th style="min-width:120px">傾向</th></tr></thead><tbody>';
+  if (!list.length) {
+    html += '<tr><td colspan="14" style="text-align:left;color:var(--sub)">'
+      + 'この条件に当てはまるお客様はいません。傾向や再現性の絞り込みを外してみてください</td></tr>';
+  }
   list.forEach(function(x) {
     const c = x.c;
     html += '<tr><td>' + esc(c.name) + '</td>'
