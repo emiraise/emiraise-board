@@ -188,6 +188,13 @@
   .rep.zebra tbody tr:hover td:first-child { background:#e3ede8; }
   .rep.zebra tbody tr.grp td,
   .rep.zebra tbody tr.grp td:first-child { background:#d8e2dc; }
+  /* データタブ：時間帯が固定されているお客様の分類 */
+  .cb-morning { background:#ffe6b8; color:#7a5200; }
+  .cb-night   { background:#2f3b6b; color:#fff; }
+  .cb-am      { background:#d9edc7; color:#3c5a24; }
+  .cb-pm      { background:#e3d3f0; color:#4a2a63; }
+  .cb-week    { background:#cfe6ee; color:#1e4a58; }
+  .cb-free    { background:#eceff0; color:#68727a; }
   .compass { font-weight:800; font-size:12.5px; letter-spacing:.06em; color:#7a5c1e; background:linear-gradient(135deg, #f3e7c8, #e8d5a3); padding:6px 13px; border-radius:999px; text-decoration:none; box-shadow:2px 2px 5px var(--sd, rgba(0,0,0,.12)), -2px -2px 5px var(--sl, rgba(255,255,255,.7)); margin-left:10px; white-space:nowrap; }
   .compass:hover { filter:brightness(1.04); }
   .compass.on { box-shadow:inset 2px 2px 5px rgba(122,92,30,.3); }
@@ -266,6 +273,7 @@
   <a href="#/mid">ヒアリング</a>
   <a href="#/subs">月謝</a>
   <a href="#/report">日報</a>
+  <a href="#/data">データ</a>
   <a href="#/search">検索</a>
   <button id="pwBtn" title="パスワード変更">🔑</button>
   <button id="logoutBtn">ログアウト</button>
@@ -3705,6 +3713,200 @@ async function renderTrial() {
 
 
 
+// ── データ（シフト設計用の分析／全スタッフ閲覧可） ─────────────
+// 時間帯の区切りは大地さんの指定（2026-09-11）。名前もそのまま使う
+const BANDS = [
+  { key: '朝',     label: '朝',     range: '9-12',  from: 9,  to: 12 },
+  { key: '昼',     label: '昼',     range: '12-14', from: 12, to: 14 },
+  { key: '昼過ぎ', label: '昼過ぎ', range: '14-16', from: 14, to: 16 },
+  { key: '夕方',   label: '夕方',   range: '16-18', from: 16, to: 18 },
+  { key: '夜',     label: '夜',     range: '18-21', from: 18, to: 24 },
+];
+const DOW_LABEL = ['日', '月', '火', '水', '木', '金', '土'];
+function bandOf(hour) {
+  for (let i = 0; i < BANDS.length; i++) {
+    if (hour >= BANDS[i].from && hour < BANDS[i].to) return BANDS[i].key;
+  }
+  return '';
+}
+// 時間帯が偏っているお客様を「◯◯しか来られない方」として分類する
+function constraintOf(c) {
+  const n = c.total;
+  if (n < 5) return { tag: '', note: '来店が少なく判断できません' };
+  if (c.朝 >= n * 0.9) return { tag: '🌅 朝だけ', cls: 'cb-morning' };
+  if (c.夜 >= n * 0.9) return { tag: '🌙 夜だけ', cls: 'cb-night' };
+  if (c.朝 + c.昼 >= n * 0.9) return { tag: '☀️ 午前〜昼のみ', cls: 'cb-am' };
+  if (c.夕方 + c.夜 >= n * 0.9) return { tag: '🌆 夕方以降のみ', cls: 'cb-pm' };
+  if (c.weekend >= n * 0.9) return { tag: '🗓 土日のみ', cls: 'cb-week' };
+  return { tag: '柔軟', cls: 'cb-free' };
+}
+
+async function renderData(params) {
+  const _seq = newRender();
+  app.innerHTML = '<div class="empty">読み込み中…</div>';
+  const selStore = params.get('store') || '';
+  const selDow   = params.get('dow') || '';
+  const selStaff = params.get('staff') || '';
+  const selBand  = params.get('band') || '';
+  const days = parseInt(params.get('days') || '180', 10);
+
+  const today = jstToday();
+  const from = addDays(today, -days);
+  const [resQ, custQ] = await Promise.all([
+    fetchRange(from, today),
+    fetchTable('crm_customers', 'merchant_id,customer_id,name,merchant_name,subscriptions'),
+  ]);
+  if (stale(_seq)) return;
+  if (resQ.error || custQ.error) {
+    app.innerHTML = '<div class="empty">読み込みエラー: '
+      + esc((resQ.error || custQ.error).message) + '</div>';
+    return;
+  }
+
+  // 会員（有効な月謝あり）の情報。契約元の店舗でだけ数える
+  const memberOf = {};
+  (custQ.data || []).forEach(function(cu) {
+    const q = subQuota(cu.subscriptions, cu.merchant_id);
+    if (!q) return;
+    const k = nameKey(cu.name);
+    if (!k) return;
+    const st = ((cu.merchant_name || '').split(/[\s　]/).pop()) || '店舗不明';
+    memberOf[k] = { name: cu.name, quota: q, store: st };
+  });
+
+  // 予約を1件ずつ、お客様・曜日・時間帯・担当に振り分ける
+  const rows = (resQ.data || []).filter(function(r) {
+    if (INTERNAL_NAME_RE.test(r.customer_name || '')) return false;
+    if (INTERNAL_NAME_RE.test(r.menu || '')) return false;
+    return true;
+  });
+  const staffSet = {}, cust = {}, grid = {}, bandTot = {}, dowTot = {};
+  rows.forEach(function(r) {
+    const d = new Date(r.booking_start);
+    const ymd = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(d);
+    const hh = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hour12: false }).format(d), 10);
+    const wd = new Date(ymd + 'T00:00:00+09:00').getUTCDay();  // 0=日
+    const band = bandOf(hh);
+    if (!band) return;
+    const staff = (r.staff_names && r.staff_names[0]) || '担当なし';
+    staffSet[staff] = true;
+    if (selStore && (r.store_tag || '') !== selStore) return;
+    if (selDow && String(wd) !== selDow) return;
+    if (selStaff && staff !== selStaff) return;
+    if (selBand && band !== selBand) return;
+    const key = wd + '|' + band;
+    grid[key] = (grid[key] || 0) + 1;
+    bandTot[band] = (bandTot[band] || 0) + 1;
+    dowTot[wd] = (dowTot[wd] || 0) + 1;
+    const k = nameKey(r.customer_name);
+    if (!k) return;
+    const c = cust[k] || (cust[k] = { name: r.customer_name, total: 0, weekend: 0, staff: {},
+      朝: 0, 昼: 0, 昼過ぎ: 0, 夕方: 0, 夜: 0, stores: {} });
+    c.total++; c[band]++;
+    if (wd === 0 || wd === 6) c.weekend++;
+    c.staff[staff] = (c.staff[staff] || 0) + 1;
+    c.stores[r.store_tag || ''] = true;
+  });
+
+  function link(over) {
+    const q = { store: selStore, dow: selDow, staff: selStaff, band: selBand, days: String(days) };
+    Object.keys(over).forEach(function(k) { q[k] = over[k]; });
+    const parts = [];
+    Object.keys(q).forEach(function(k) { if (q[k] && !(k === 'days' && q[k] === '180')) parts.push(k + '=' + encodeURIComponent(q[k])); });
+    return '#/data' + (parts.length ? '?' + parts.join('&') : '');
+  }
+  function chipRow(label, items, cur, key) {
+    let o = '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:44px">' + label + '</span>';
+    o += '<a href="' + link((function(){ const x={}; x[key]=''; return x; })()) + '"' + (!cur ? ' class="on"' : '') + '>すべて</a>';
+    items.forEach(function(it) {
+      const v = String(it.v);
+      o += '<a href="' + link((function(){ const x={}; x[key]=v; return x; })()) + '"'
+        + (cur === v ? ' class="on"' : '') + '>' + esc(it.t) + '</a>';
+    });
+    return o + '</div>';
+  }
+
+  let html = '<h2>📊 データ（シフト設計用）<small style="font-weight:400;color:var(--sub);font-size:12px">　直近' + days + '日・内部予定は除外</small></h2>';
+  const stores = STORE_ORDER_ALL.slice();
+  html += chipRow('店舗', stores.map(function(x) { return { v: x, t: x }; }), selStore, 'store');
+  html += chipRow('曜日', [1,2,3,4,5,6,0].map(function(w) { return { v: w, t: DOW_LABEL[w] + '曜' }; }), selDow, 'dow');
+  html += chipRow('担当', Object.keys(staffSet).sort(function(a, b) {
+      const ia = STAFF_ORDER.indexOf(a), ib = STAFF_ORDER.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b, 'ja');
+    }).map(function(x) { return { v: x, t: x }; }), selStaff, 'staff');
+  html += chipRow('時間帯', BANDS.map(function(b) { return { v: b.key, t: b.label + ' ' + b.range }; }), selBand, 'band');
+  html += chipRow('期間', [{ v: '90', t: '90日' }, { v: '180', t: '180日' }, { v: '365', t: '1年' }],
+                  String(days) === '180' ? '' : String(days), 'days');
+
+  const totalAll = Object.keys(bandTot).reduce(function(a, k) { return a + bandTot[k]; }, 0);
+  if (!totalAll) {
+    app.innerHTML = html + '<div class="empty">該当する予約がありません。条件をゆるめてください</div>';
+    return;
+  }
+
+  // 曜日 × 時間帯のヒートマップ
+  let maxCell = 0;
+  Object.keys(grid).forEach(function(k) { if (grid[k] > maxCell) maxCell = grid[k]; });
+  html += '<div class="card"><h3>曜日 × 時間帯（予約数）</h3>';
+  html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr><th>曜日</th>';
+  BANDS.forEach(function(b) { html += '<th>' + b.label + '<br><small style="font-weight:400">' + b.range + '</small></th>'; });
+  html += '<th>合計</th></tr></thead><tbody>';
+  [1,2,3,4,5,6,0].forEach(function(w) {
+    if (selDow && String(w) !== selDow) return;
+    html += '<tr><td>' + DOW_LABEL[w] + '曜</td>';
+    BANDS.forEach(function(b) {
+      const n = grid[w + '|' + b.key] || 0;
+      const a = maxCell ? n / maxCell : 0;
+      html += '<td style="background:rgba(26,106,79,' + (a * 0.62).toFixed(2) + ');'
+        + (a > 0.55 ? 'color:#fff;font-weight:700' : '') + '">' + (n || '·') + '</td>';
+    });
+    html += '<td style="font-weight:700">' + (dowTot[w] || 0) + '</td></tr>';
+  });
+  html += '<tr class="tot"><td>合計</td>';
+  BANDS.forEach(function(b) { html += '<td>' + (bandTot[b.key] || 0) + '</td>'; });
+  html += '<td>' + totalAll + '</td></tr></tbody></table></div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">色が濃いほど予約が多い時間帯です。曜日や担当で絞ると、その条件での山が見えます</div></div>';
+
+  // お客様別の内訳
+  const list = Object.keys(cust).map(function(k) {
+    const c = cust[k];
+    const top = Object.keys(c.staff).sort(function(a, b) { return c.staff[b] - c.staff[a]; })[0] || '—';
+    const m = memberOf[k];
+    return { k: k, c: c, top: top, topPct: Math.round(c.staff[top] * 100 / c.total),
+             quota: m ? m.quota : 0, member: !!m, cons: constraintOf(c) };
+  }).sort(function(a, b) { return b.c.total - a.c.total; });
+
+  const fixed = list.filter(function(x) { return x.cons.tag && x.cons.tag !== '柔軟'; });
+  html += '<div class="card"><h3>お客様別の時間帯（' + list.length + '名）'
+    + '<small style="font-weight:400;color:var(--sub);font-size:12px">　うち時間帯が固定されている方 '
+    + fixed.length + '名</small></h3>';
+  html += '<div class="tlwrap" style="padding:0"><table class="rep zebra"><thead><tr>'
+    + '<th>お客様</th><th>コース</th><th>来店</th><th>主担当</th><th>担当固定</th>';
+  BANDS.forEach(function(b) { html += '<th>' + b.label + '</th>'; });
+  html += '<th>土日</th><th style="min-width:120px">傾向</th></tr></thead><tbody>';
+  list.forEach(function(x) {
+    const c = x.c;
+    html += '<tr><td>' + esc(c.name) + '</td>'
+      + '<td>' + (x.quota ? '月' + x.quota + '回' : '<span style="color:var(--sub)">—</span>') + '</td>'
+      + '<td style="font-weight:700">' + c.total + '</td>'
+      + '<td>' + esc(x.top) + '</td>'
+      + '<td' + (x.topPct >= 90 ? ' style="color:#b3261e;font-weight:700"' : '') + '>' + x.topPct + '%</td>';
+    BANDS.forEach(function(b) {
+      const n = c[b.key];
+      html += '<td' + (n ? ' style="font-weight:700"' : ' style="color:#ccc"') + '>' + (n || '·') + '</td>';
+    });
+    html += '<td>' + (c.weekend || '·') + '</td>'
+      + '<td style="text-align:left">' + (x.cons.tag ? '<span class="pill ' + (x.cons.cls || '') + '">' + x.cons.tag + '</span>'
+          : '<span style="color:var(--sub);font-size:11px">' + esc(x.cons.note || '') + '</span>') + '</td></tr>';
+  });
+  html += '</tbody></table></div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
+    + '「◯◯だけ」＝来店5回以上で、その時間帯に9割以上が集中している方。担当固定が90%以上の方は赤字です。'
+    + 'コース欄が「—」の方は、現在有効な月謝がありません（体験のみ・休会など）</div></div>';
+  if (stale(_seq)) return;
+  app.innerHTML = html;
+}
+
 // ── 財務（metrics_monthly／権限はRLSで自動的に絞られる） ─────
 const FIN_ORDER = ['金沢本店', '金沢駅西店', '富山東店', '福井高柳店', '天王寺店', '運営本部'];
 const FIN_COST = [['labor', '人件費'], ['rent', '地代家賃'], ['ads', '広告宣伝費'], ['utilities', '水道光熱費'],
@@ -3862,6 +4064,10 @@ async function render() {
   }
   if (hash.indexOf('#/subs') === 0) {
     renderSubs(new URLSearchParams(hash.split('?')[1] || ''));
+    return;
+  }
+  if (hash.indexOf('#/data') === 0) {
+    renderData(new URLSearchParams(hash.split('?')[1] || ''));
     return;
   }
   if (hash.indexOf('#/search') === 0) {
