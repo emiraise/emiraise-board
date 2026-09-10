@@ -3834,6 +3834,8 @@ async function renderData(params) {
     grid[key] = (grid[key] || 0) + 1;
     bandTot[band] = (bandTot[band] || 0) + 1;
     dowTot[wd] = (dowTot[wd] || 0) + 1;
+    // 需給ギャップ用は、供給を計算できる日（シフトがある日）だけで数える
+    r.__ymd = ymd; r.__wd = wd; r.__band = band; r.__staff = staff;
     const k = nameKey(r.customer_name);
     if (!k) return;
     const c = cust[k] || (cust[k] = { name: r.customer_name, total: 0, weekend: 0, staff: {},
@@ -3930,6 +3932,9 @@ async function renderData(params) {
     return out;
   }
   const supply = {}, staffSupply = {};
+  // シフトが登録されている「スタッフ×日」。ここに無い日のレッスンは
+  // 供給を計算できないため、埋まり率の対象から外す（100%超えの原因）
+  const hasShift = {}, shiftDays = {};
   (shiftQ || []).forEach(function(sh) {
     if (sh.kind !== 'work') return;
     if (RETIRED_STAFF.indexOf(sh.staff_name) >= 0) return;
@@ -3942,6 +3947,8 @@ async function renderData(params) {
       if (st && st !== selStore) return;
       if (!st) return;
     }
+    hasShift[sh.staff_name + '|' + sh.date] = true;
+    shiftDays[sh.staff_name] = (shiftDays[sh.staff_name] || 0) + 1;
     const ranges = codeRanges(sh);
     BANDS.forEach(function(b) {
       if (selBand && b.key !== selBand) return;
@@ -3951,6 +3958,15 @@ async function renderData(params) {
       supply[wd + '|' + b.key] = (supply[wd + '|' + b.key] || 0) + h;
       staffSupply[sh.staff_name] = (staffSupply[sh.staff_name] || 0) + h;
     });
+  });
+
+  // 需給ギャップ用の需要：シフトが登録されている日のレッスンだけを数える
+  const demShift = {};
+  let demOff = 0;
+  rows.forEach(function(r) {
+    if (!r.__band) return;
+    if (!hasShift[r.__staff + '|' + r.__ymd]) { demOff++; return; }
+    demShift[r.__wd + '|' + r.__band] = (demShift[r.__wd + '|' + r.__band] || 0) + 1;
   });
 
   const supTotal = Object.keys(supply).reduce(function(a, k) { return a + supply[k]; }, 0);
@@ -3972,7 +3988,7 @@ async function renderData(params) {
       html += '<tr><td>' + DOW_LABEL[w] + '曜</td>';
       BANDS.forEach(function(b) {
         if (selBand && b.key !== selBand) { html += '<td style="color:#ccc">·</td>'; return; }
-        const dem = grid[w + '|' + b.key] || 0;
+        const dem = demShift[w + '|' + b.key] || 0;
         const sup = supply[w + '|' + b.key] || 0;
         if (!sup && !dem) { html += '<td style="color:#ccc">·</td>'; return; }
         const rate = sup ? Math.round(dem * 100 / sup) : 999;
@@ -3984,6 +4000,8 @@ async function renderData(params) {
     });
     html += '</tbody></table></div>';
     html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
+      + (demOff ? '<b style="color:#b3261e">※ シフト表に出勤が無い日のレッスン ' + demOff
+          + '件は、持ち枠を計算できないため除いています</b><br>' : '')
       + '<b style="color:#b3261e">85%以上</b>＝ほぼ満席で予約が取れない　'
       + '<b style="color:#c07a2a">60〜85%</b>＝ちょうど良い　'
       + '<b style="color:#2e7d55">30〜60%</b>＝余裕あり　'
@@ -3991,7 +4009,7 @@ async function renderData(params) {
       + '「枠なし」は需要はあるのに出勤がない時間帯です</div></div>';
 
     // スタッフ別の埋まり率
-    const byStaff = {};
+    const byStaff = {}, offShift = {};
     rows.forEach(function(r) {
       const st = (r.staff_names && r.staff_names[0]) || '担当なし';
       if (RETIRED_STAFF.indexOf(st) >= 0) return;
@@ -4000,6 +4018,8 @@ async function renderData(params) {
       const ymd = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(d);
       const wd = new Date(ymd + 'T00:00:00+09:00').getUTCDay();
       if (selDow && String(wd) !== selDow) return;
+      // シフトに出勤の記録が無い日は、持ち枠が分からないので分子からも外す
+      if (!hasShift[st + '|' + ymd]) { offShift[st] = (offShift[st] || 0) + 1; return; }
       const hh = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hour12: false }).format(d), 10);
       const bd = bandOf(hh);
       if (!bd) return;
@@ -4014,21 +4034,31 @@ async function renderData(params) {
     });
     if (names.length) {
       html += '<div class="card"><h3>スタッフ別の埋まり率</h3>';
+      let anyOff = false;
       html += '<div class="tlwrap" style="padding:0"><table class="rep zebra"><thead><tr>'
-        + '<th>スタッフ</th><th>レッスン</th><th>出勤の持ち枠</th><th>埋まり率</th><th style="min-width:160px">　</th></tr></thead><tbody>';
+        + '<th>スタッフ</th><th>出勤日</th><th>レッスン</th><th>出勤の持ち枠</th><th>埋まり率</th>'
+        + '<th style="min-width:140px">　</th><th>シフト未登録</th></tr></thead><tbody>';
       names.forEach(function(n) {
-        const les = byStaff[n] || 0, sup = staffSupply[n] || 0;
+        const les = byStaff[n] || 0, sup = staffSupply[n] || 0, off = offShift[n] || 0;
+        if (off) anyOff = true;
         const rate = sup ? Math.round(les * 100 / sup) : 0;
         const col = rate >= 85 ? '#b3261e' : rate >= 60 ? '#c07a2a' : rate >= 30 ? '#2e7d55' : '#7a8a92';
-        html += '<tr><td>' + esc(n) + '</td><td>' + les + '</td><td>' + Math.round(sup) + '枠</td>'
+        html += '<tr><td>' + esc(n) + '</td><td>' + (shiftDays[n] || 0) + '日</td>'
+          + '<td>' + les + '</td><td>' + Math.round(sup) + '枠</td>'
           + '<td style="color:' + col + ';font-weight:800">' + rate + '%</td>'
           + '<td><div style="background:#e6ebe8;border-radius:6px;height:10px;overflow:hidden">'
-          + '<div style="width:' + Math.min(100, rate) + '%;height:100%;background:' + col + '"></div></div></td></tr>';
+          + '<div style="width:' + Math.min(100, rate) + '%;height:100%;background:' + col + '"></div></div></td>'
+          + '<td' + (off ? ' style="color:#b3261e;font-weight:700"' : ' style="color:#ccc"') + '>'
+          + (off ? off + '件' : '·') + '</td></tr>';
       });
       html += '</tbody></table></div>';
       html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
         + '出勤の持ち枠＝シフトの勤務時間（A/B/C/D）から算出した1時間単位の受け入れ可能数。'
-        + '担当が別店舗の応援に入った日も、その店舗で絞れば分けて見られます</div></div>';
+        + '1レッスン＝1枠なので、埋まり率は100%を超えません。'
+        + (anyOff ? '<br><b style="color:#b3261e">「シフト未登録」＝シフト表に出勤が無い日のレッスンです。'
+            + '持ち枠を計算できないため、この分は上の数字から除いています。'
+            + 'シフト表に反映すると、より正確な埋まり率になります。</b>' : '')
+        + '</div></div>';
     }
   }
 
@@ -4084,12 +4114,18 @@ async function renderData(params) {
     html += '<td>' + (c.weekend || '·') + '</td>'
       + '<td style="text-align:left"><span class="pill ' + x.flex.cls + '" title="' + esc(x.flex.note) + '">'
         + x.flex.tag + (x.flex.score !== null ? ' ' + x.flex.score + '%' : '') + '</span></td>'
-      + '<td>' + (x.dowFix.pct !== null ? esc(x.dowFix.top) + ' ' + x.dowFix.pct + '%' : '·') + '</td>'
+      + '<td' + (x.dowFix.pct === null ? '' :
+            x.dowFix.pct >= 70 ? ' style="color:#b3261e;font-weight:800"' :
+            x.dowFix.pct >= 50 ? ' style="font-weight:800"' : '') + '>'
+        + (x.dowFix.pct !== null ? esc(x.dowFix.top) + ' ' + x.dowFix.pct + '%' : '·') + '</td>'
       + '<td style="text-align:left">' + (x.cons.tag ? '<span class="pill ' + (x.cons.cls || '') + '">' + x.cons.tag + '</span>'
           : '<span style="color:var(--sub);font-size:11px">' + esc(x.cons.note || '') + '</span>') + '</td></tr>';
   });
   html += '</tbody></table></div>';
   html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
+    + '<b>よく来る曜日</b>＝最も多い曜日とその割合。'
+    + '<b>50〜70%は太字</b>（その曜日にある程度固まっている）、'
+    + '<b style="color:#b3261e">70%以上は赤字</b>（その曜日でないと来られない）。<br>'
     + '<b>再現性</b>＝最も多い時間帯が全体に占める割合。'
     + '<b style="color:#b3261e">🔒固定(70%以上)</b>＝この時間しか予約が入らない／'
     + '<b style="color:#8a6a1e">🔁準固定(45〜70%)</b>＝ある程度決まっているが対応可／'
