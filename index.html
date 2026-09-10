@@ -180,6 +180,14 @@
   .rep th, .rep td { border:1px solid var(--line); padding:8px 6px; text-align:right; white-space:nowrap; }
   .rep th:first-child, .rep td:first-child { text-align:left; position:sticky; left:0; background:#fff; }
   .rep thead th { background:#eef3f1; text-align:center; }
+  /* 月謝タブの表。お客様名から「翌月」まで横に長く目で追いにくいため、
+     1行おきに色を変え、触れている行を強調する（スタッフ要望・2026-09-10） */
+  .rep.zebra tbody tr:nth-child(even) td { background:#f2f6f4; }
+  .rep.zebra tbody tr:nth-child(even) td:first-child { background:#f2f6f4; }
+  .rep.zebra tbody tr:hover td,
+  .rep.zebra tbody tr:hover td:first-child { background:#e3ede8; }
+  .rep.zebra tbody tr.grp td,
+  .rep.zebra tbody tr.grp td:first-child { background:#d8e2dc; }
   .compass { font-weight:800; font-size:12.5px; letter-spacing:.06em; color:#7a5c1e; background:linear-gradient(135deg, #f3e7c8, #e8d5a3); padding:6px 13px; border-radius:999px; text-decoration:none; box-shadow:2px 2px 5px var(--sd, rgba(0,0,0,.12)), -2px -2px 5px var(--sl, rgba(255,255,255,.7)); margin-left:10px; white-space:nowrap; }
   .compass:hover { filter:brightness(1.04); }
   .compass.on { box-shadow:inset 2px 2px 5px rgba(122,92,30,.3); }
@@ -225,6 +233,12 @@
   .rep, .rep th:first-child, .rep td:first-child { background:var(--bg); }
   .rep thead th { background:#dde5df; }
   .rep .tot td { background:#dde5df; }
+  .rep.zebra tbody tr:nth-child(even) td,
+  .rep.zebra tbody tr:nth-child(even) td:first-child { background:#dfe7e2; }
+  .rep.zebra tbody tr:hover td,
+  .rep.zebra tbody tr:hover td:first-child { background:#cfdcd5; }
+  .rep.zebra tbody tr.grp td,
+  .rep.zebra tbody tr.grp td:first-child { background:#c9d6ce; }
   input, select, textarea { background:var(--bg); border:none !important; box-shadow:inset 3px 3px 6px var(--sd), inset -3px -3px 6px var(--sl); border-radius:12px; outline:none; }
   .daynav button, .selbar button, .tabs a, .chips a, .tagbtn, .mic, .searchbar .btn { background:var(--bg); border:none; box-shadow:3px 3px 7px var(--sd), -3px -3px 7px var(--sl); }
   .tabs a.on, .chips a.on { background:var(--bg); color:var(--accent); font-weight:800; border:none; box-shadow:inset 3px 3px 6px var(--sd), inset -3px -3px 6px var(--sl); }
@@ -2375,7 +2389,7 @@ async function renderSubs(params) {
     + '</div>';
   html += '<div style="color:var(--sub);font-size:12px;margin-bottom:8px">当月＝今月中の予約状況（消化済み含む・キャンセルは含まない）／❌キャンセル＝その月にキャンセルされた回数と日付（消化に数えないため、契約回数との差はここで説明がつきます）／翌月＝毎月10日の予約開放後にチェック</div>';
 
-  html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
+  html += '<div class="tlwrap" style="padding:0"><table class="rep zebra"><thead><tr>'
     + '<th>お客様</th><th>コース</th><th>当月（消化/予約/枠）</th><th>❌キャンセル</th><th>翌月' + nmo + '月（予約/枠）</th><th style="min-width:170px">備考</th></tr></thead><tbody>';
   let curStore = '';
   list.forEach(function(x) {
@@ -2385,7 +2399,7 @@ async function renderSubs(params) {
       const r = inStore.filter(function(y) { return y.sev >= 3; }).length;
       const yl = inStore.filter(function(y) { return y.sev === 2 || y.sev === 1; }).length;
       const g = inStore.filter(function(y) { return y.sev === 0; }).length;
-      html += '<tr><td colspan="6" style="text-align:left;background:#d8e2dc;font-weight:800;font-size:13.5px">'
+      html += '<tr class="grp"><td colspan="6" style="text-align:left;font-weight:800;font-size:13.5px">'
         + '🏬 ' + esc(curStore) + '　会員' + inStore.length + '名（🔴' + r + '・🟡' + yl + '・🟢' + g + '）</td></tr>';
     }
     html += '<tr>'
