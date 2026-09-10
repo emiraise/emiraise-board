@@ -3949,15 +3949,19 @@ async function renderData(params) {
     if (i >= 0) a.splice(i, 1); else a.push(String(v));
     return a.join(',');
   }
-  function chipRow(label, items, cur, key) {
+  function chipRow(label, items, cur, key, opts) {
+    const op = opts || {};
+    const on = op.on || cur;                 // 見た目の選択状態（期間は既定値を光らせる）
     let o = '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:44px">'
-      + label + (cur.length > 1 ? '<b style="color:var(--accent)">×' + cur.length + '</b>' : '') + '</span>';
-    const clearQ = {}; clearQ[key] = '';
-    o += '<a href="' + link(clearQ) + '"' + (!cur.length ? ' class="on"' : '') + '>すべて</a>';
+      + label + (on.length > 1 ? '<b style="color:var(--accent)">×' + on.length + '</b>' : '') + '</span>';
+    if (!op.noClear) {
+      const clearQ = {}; clearQ[key] = '';
+      o += '<a href="' + link(clearQ) + '"' + (!cur.length ? ' class="on"' : '') + '>すべて</a>';
+    }
     items.forEach(function(it) {
       const v = String(it.v);
       const q = {}; q[key] = toggled(cur, v);
-      o += '<a href="' + link(q) + '"' + (cur.indexOf(v) >= 0 ? ' class="on"' : '') + '>' + esc(it.t) + '</a>';
+      o += '<a href="' + link(q) + '"' + (on.indexOf(v) >= 0 ? ' class="on"' : '') + '>' + esc(it.t) + '</a>';
     });
     return o + '</div>';
   }
@@ -3981,7 +3985,7 @@ async function renderData(params) {
       { v: 'semi',  t: '🔁 準固定（ある程度決まっている）' },
       { v: 'free',  t: '🔓 柔軟（空きを埋められる）' }], selFlexs, 'flex');
   html += chipRow('期間', RANGE_ORDER.map(function(k) { return { v: k, t: RANGE_DEF[k].t }; }),
-                  selRanges, 'range');
+                  selRanges, 'range', { noClear: true, on: useRanges });
 
   const totalAll = Object.keys(bandTot).reduce(function(a, k) { return a + bandTot[k]; }, 0);
   if (!totalAll) {
