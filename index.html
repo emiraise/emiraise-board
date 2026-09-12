@@ -3393,7 +3393,8 @@ async function renderTrial() {
       : Promise.resolve({ data: [], error: null }),
     sb.from('crm_lead_sources').select('merchant_id,customer_id,source').limit(2000),
     fetchTable('crm_lead_source_names', 'name_key,store,source,origin', ['name_key', 'store']),
-    fetchTable('v_trial_outcomes', 'name_key,trial_date,next_date,after_count,had_visit,had_cancel', ['name_key']),
+    fetchTable('v_trial_outcomes', 'name_key,trial_date,next_date,after_count,had_visit,had_cancel,'
+               + 'contract_date,contract_name,sheet_won,sheet_lost,sheet_course,won', ['name_key']),
   ]);
   // 体験のその後（体験より後の日に予約が入っていれば成約とみなす）
   // 取得に失敗すると全員「未成約」に見えてしまうので、黙って落とさず画面に出す
@@ -3434,6 +3435,18 @@ async function renderTrial() {
   }
   // 体験のその後を判定する。未来の体験はまだ結果が出ていないので判定しない
   function isCx(r) { return r.status && r.status !== 'accepted'; }
+  // 成約かどうかは3つの根拠のどれかで決まる（v_trial_outcomes が判定済み）。
+  //   ①体験より後の予約  ②体験日以降の月謝・回数券の契約  ③測定シートの「成約」欄が◯
+  // 次の予約をまだ取っていない契約者（福井高柳の牧野さん 2026-09-09）が
+  // 未成約に見えていたため、②③を足した
+  function isWon(o) { return !!(o && (o.won || o.next_date || o.contract_date || o.sheet_won)); }
+  function wonWhy(o) {
+    const why = [];
+    if (o.next_date) why.push(o.next_date + ' に次の予約（以降 ' + (o.after_count || 0) + '件）');
+    if (o.contract_date) why.push(o.contract_date + ' に契約' + (o.contract_name ? '（' + o.contract_name + '）' : ''));
+    if (o.sheet_won) why.push('継続率測定シートで成約◯' + (o.sheet_course ? '（' + o.sheet_course + '）' : ''));
+    return why.join(' ／ ');
+  }
   function outcomeOf(r) {
     const o = outcome[personKey(r)] || outcome[nameKey(r.customer_name)];
     const d = dOf(r);
@@ -3442,16 +3455,20 @@ async function renderTrial() {
       return { kind: (o && o.had_visit) ? 'reschedule' : 'cancel' };
     }
     if (d >= jstToday()) return { kind: 'upcoming' };
-    if (o && o.next_date) return { kind: 'won', next: o.next_date, n: o.after_count };
-    return { kind: 'lost' };
+    if (isWon(o)) return { kind: 'won', why: wonWhy(o) };
+    return { kind: 'lost', sure: !!(o && o.sheet_lost) };
   }
   function outcomeTag(r) {
     const v = outcomeOf(r);
     if (v.kind === 'won') {
-      return '<span class="pill" style="background:#0c7a3e;color:#fff" title="体験のあと '
-        + esc(v.next) + ' に予約が入っています（以降 ' + v.n + '件）">✅ 成約</span>';
+      return '<span class="pill" style="background:#0c7a3e;color:#fff" title="根拠: '
+        + esc(v.why) + '">✅ 成約</span>';
     }
-    if (v.kind === 'lost') return '<span class="pill" style="background:#f0dede;color:#8a2b22" title="体験より後の予約がまだありません">未成約</span>';
+    if (v.kind === 'lost') {
+      return v.sure
+        ? '<span class="pill" style="background:#f0dede;color:#8a2b22" title="継続率測定シートで未成約（X）と記入されています">未成約</span>'
+        : '<span class="pill" style="background:#f6efe6;color:#8a6a22" title="次の予約・契約がまだ確認できていません。シートに記入されるか次のご予約が入れば自動で成約に変わります">未成約?</span>';
+    }
     if (v.kind === 'cancel') return '<span class="pill" style="background:#8a2b22;color:#fff">❌ キャンセル</span>';
     if (v.kind === 'reschedule') return '<span class="pill" style="background:#e4d7c0;color:#6b4a1a" title="キャンセル後に別の日で来店されています">↩︎ 振替</span>';
     return '<span class="pill">🆕 予定</span>';
@@ -3510,7 +3527,7 @@ async function renderTrial() {
       if (dOf(r) < jstToday()) {
         visited++;
         const o = outcome[personKey(r)] || outcome[nameKey(r.customer_name)];
-        if (o && o.next_date) won++;
+        if (isWon(o)) won++;
       }
     });
     return { total: total, cx: cx, visited: visited, won: won };
@@ -3537,7 +3554,7 @@ async function renderTrial() {
       const o = outcome[k] || outcome[nameKey(r.customer_name)] || {};
       if (o.had_cancel && !o.had_visit) { cxOnly++; return; }
       if (o.had_cancel && o.had_visit) resched++;
-      if (o.trial_date && o.trial_date < jstToday()) { visited++; if (o.next_date) won++; }
+      if (o.trial_date && o.trial_date < jstToday()) { visited++; if (isWon(o)) won++; }
     });
     if (!people) return '';
     const cvr = visited ? Math.round(won / visited * 100) : 0;
@@ -3569,7 +3586,7 @@ async function renderTrial() {
       if (dOf(r) < jstToday()) {
         visited++;
         const o = outcome[personKey(r)] || outcome[nameKey(r.customer_name)];
-        if (o && o.next_date) won++;
+        if (isWon(o)) won++;
       }
     });
     const total = Object.keys(seen).length;
@@ -3608,6 +3625,37 @@ async function renderTrial() {
     return o + '</div>';
   }
   // 経路別の内訳（今月／全期間）。クリックでその経路だけに絞り込む
+  // 記入待ち。来店済みなのに経路や成約が埋まっていない方を名指しで出す。
+  // 「毎回ちゃんと入る」ようにするには、残っている手作業が何件なのかが
+  // 見えていないと埋まらないため（2026-09-12 大地さんの指摘）
+  function todoHtml(list) {
+    const seen = {}, needSrc = [], needOut = [];
+    list.forEach(function(r) {
+      const k = personKey(r);
+      if (!k || seen[k] || isCx(r) || dOf(r) >= jstToday()) return;
+      seen[k] = true;
+      const link = '<a style="color:var(--accent);text-decoration:none" href="#/c/'
+        + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">'
+        + esc(r.customer_name || '（名前なし）') + '</a>'
+        + '<span style="color:var(--sub)">　' + esc(fmtDate(r.booking_start)) + '</span>';
+      if (srcOf(r).src === '未設定') needSrc.push(link);
+      const v = outcomeOf(r);
+      if (v.kind === 'lost' && !v.sure) needOut.push(link);
+    });
+    if (!needSrc.length && !needOut.length) return '';
+    let o = '<div class="card" style="border-left:5px solid #c9a227"><h3>📝 記入待ち</h3>';
+    if (needSrc.length) {
+      o += '<div style="font-size:12.5px;margin-bottom:4px"><b>流入経路が未記入 ' + needSrc.length + '名</b>'
+        + '<span style="color:var(--sub)">（カウンセリングシートか継続率測定シートに書けば6時間以内に自動で入ります。急ぐときは右の枠から直接選べます）</span></div>'
+        + '<div class="chips">' + needSrc.map(function(x) { return '<a style="pointer-events:auto">' + x + '</a>'; }).join('') + '</div>';
+    }
+    if (needOut.length) {
+      o += '<div style="font-size:12.5px;margin:8px 0 4px"><b>成約かどうか未確定 ' + needOut.length + '名</b>'
+        + '<span style="color:var(--sub)">（継続率測定シートの「成約」欄に◯／Xを入れると確定します。次のご予約や契約が入れば自動で成約になります）</span></div>'
+        + '<div class="chips">' + needOut.map(function(x) { return '<a style="pointer-events:auto">' + x + '</a>'; }).join('') + '</div>';
+    }
+    return o + '</div>';
+  }
   function srcChips(subset) {
     const tally = {}, tallyM = {};
     subset.forEach(function(r) {
@@ -3693,6 +3741,7 @@ async function renderTrial() {
 
   const byStore = selStore ? (stores[selStore] || []) : rows;
   html += statChips(byStore);
+  html += todoHtml(byStore);
   const subset = selSrc ? byStore.filter(function(r) { return srcOf(r).src === selSrc; }) : byStore;
   html += kanzashiHtml(byStore);
   html += listHtml(subset, !selStore);
@@ -3703,7 +3752,7 @@ async function renderTrial() {
       + (srcErr ? '（流入経路: ' + esc(srcErr) + '）' : '')
       + ' — 表示が正しくない可能性があります</div>';
   }
-  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">✅成約＝体験より後の日に予約が入っている方。未成約＝まだ次の予約がない方。❌キャンセル＝来店に至らなかった方で、別の日に振り替えた方は↩︎振替として区別しています</div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">✅成約＝①体験より後の予約が入っている ②体験日以降に月謝・回数券の契約がある ③新規継続率測定シートの「成約」が◯、のどれかに当てはまる方（ラベルにカーソルを合わせると根拠が出ます）。<b>未成約</b>＝シートでXと記入済み。<b>未成約?</b>＝まだ判断材料がない方で、シートの記入か次のご予約で自動的に切り替わります。❌キャンセル＝来店に至らなかった方で、別の日に振り替えた方は↩︎振替として区別しています</div>';
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">経路は「新規継続率測定シート」とカウンセリングシートの「エミライズを何で知りましたか？」から自動反映しています。「?」付きはSTORESのデータからの推定なので、各行のプルダウンで選ぶと確定として保存されます</div>';
   if (stale(_seq)) return;
   app.innerHTML = html;
