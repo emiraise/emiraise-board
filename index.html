@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
 .lsrc{font-size:10px;padding:1px 2px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--sub);max-width:88px}
+.lout{font-size:10px;padding:1px 2px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--sub);max-width:72px;margin-left:4px}
   :root { --accent:#1f6f54; --accent-d:#12463a; --bg:#f2f5f3; --card:#fff; --line:#e1e7e3; --text:#182722; --sub:#68796f; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:"Noto Sans JP",-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; }
@@ -3394,7 +3395,8 @@ async function renderTrial() {
     sb.from('crm_lead_sources').select('merchant_id,customer_id,source').limit(2000),
     fetchTable('crm_lead_source_names', 'name_key,store,source,origin', ['name_key', 'store']),
     fetchTable('v_trial_outcomes', 'name_key,trial_date,next_date,after_count,had_visit,had_cancel,'
-               + 'contract_date,contract_name,sheet_won,sheet_lost,sheet_course,won', ['name_key']),
+               + 'contract_date,contract_name,sheet_won,sheet_lost,sheet_course,won,'
+               + 'manual_outcome,manual_note,manual_by', ['name_key']),
   ]);
   // 体験のその後（体験より後の日に予約が入っていれば成約とみなす）
   // 取得に失敗すると全員「未成約」に見えてしまうので、黙って落とさず画面に出す
@@ -3439,9 +3441,14 @@ async function renderTrial() {
   //   ①体験より後の予約  ②体験日以降の月謝・回数券の契約  ③測定シートの「成約」欄が◯
   // 次の予約をまだ取っていない契約者（福井高柳の牧野さん 2026-09-09）が
   // 未成約に見えていたため、②③を足した
-  function isWon(o) { return !!(o && (o.won || o.next_date || o.contract_date || o.sheet_won)); }
+  function isWon(o) {
+    if (!o) return false;
+    if (o.manual_outcome) return o.manual_outcome === 'won';   // 人が直した内容が最優先
+    return !!(o.won || o.next_date || o.contract_date || o.sheet_won);
+  }
   function wonWhy(o) {
     const why = [];
+    if (o.manual_outcome === 'won') why.push('ボードで成約に直されています' + (o.manual_by ? '（' + o.manual_by + '）' : ''));
     if (o.next_date) why.push(o.next_date + ' に次の予約（以降 ' + (o.after_count || 0) + '件）');
     if (o.contract_date) why.push(o.contract_date + ' に契約' + (o.contract_name ? '（' + o.contract_name + '）' : ''));
     if (o.sheet_won) why.push('継続率測定シートで成約◯' + (o.sheet_course ? '（' + o.sheet_course + '）' : ''));
@@ -3456,7 +3463,8 @@ async function renderTrial() {
     }
     if (d >= jstToday()) return { kind: 'upcoming' };
     if (isWon(o)) return { kind: 'won', why: wonWhy(o) };
-    return { kind: 'lost', sure: !!(o && o.sheet_lost) };
+    return { kind: 'lost', sure: !!(o && (o.sheet_lost || o.manual_outcome === 'lost')),
+             manual: !!(o && o.manual_outcome === 'lost') };
   }
   function outcomeTag(r) {
     const v = outcomeOf(r);
@@ -3465,8 +3473,9 @@ async function renderTrial() {
         + esc(v.why) + '">✅ 成約</span>';
     }
     if (v.kind === 'lost') {
+      const why = v.manual ? 'ボードで未成約に直されています' : '継続率測定シートで未成約（X）と記入されています';
       return v.sure
-        ? '<span class="pill" style="background:#f0dede;color:#8a2b22" title="継続率測定シートで未成約（X）と記入されています">未成約</span>'
+        ? '<span class="pill" style="background:#f0dede;color:#8a2b22" title="' + esc(why) + '">未成約</span>'
         : '<span class="pill" style="background:#f6efe6;color:#8a6a22" title="次の予約・契約がまだ確認できていません。シートに記入されるか次のご予約が入れば自動で成約に変わります">未成約?</span>';
     }
     if (v.kind === 'cancel') return '<span class="pill" style="background:#8a2b22;color:#fff">❌ キャンセル</span>';
@@ -3478,6 +3487,18 @@ async function renderTrial() {
     if (!showStore) return '<span></span>';
     return '<span class="badge" style="background:' + storeColor(r.store_tag)
       + ';font-size:10px">' + esc(r.store_tag || '') + '</span>';
+  }
+  // 自動判定が実態と違うとき、その場で直せるようにする。
+  // 測定シートの記入が古いままでも正しい表示にできる（岩佐 早希子さん 2026-09-05）
+  function outSelect(r) {
+    if (isCx(r) || dOf(r) >= jstToday()) return '';
+    const o = outcome[personKey(r)] || outcome[nameKey(r.customer_name)] || {};
+    const cur = o.manual_outcome || '';
+    let sel = '<select class="lout" data-key="' + esc(personKey(r) || nameKey(r.customer_name)) + '">';
+    [['', '自動'], ['won', '✅成約'], ['lost', '未成約']].forEach(function(x) {
+      sel += '<option value="' + x[0] + '"' + (cur === x[0] ? ' selected' : '') + '>' + x[1] + '</option>';
+    });
+    return sel + '</select>';
   }
   function srcSelect(r) {
     const v = srcOf(r);
@@ -3714,7 +3735,7 @@ async function renderTrial() {
         + storeCell(r, showStore) + leadBadge(srcOf(r)) + srcSelect(r)
         + '<span class="tstaff" style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
         + '<span>' + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖</span> ' : '')
-        + outcomeTag(r) + '</span>'
+        + outcomeTag(r) + outSelect(r) + '</span>'
         + stampCell(r)
         + '</div>';
     });
@@ -3752,7 +3773,7 @@ async function renderTrial() {
       + (srcErr ? '（流入経路: ' + esc(srcErr) + '）' : '')
       + ' — 表示が正しくない可能性があります</div>';
   }
-  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">✅成約＝①体験より後の予約が入っている ②体験日以降に月謝・回数券の契約がある ③新規継続率測定シートの「成約」が◯、のどれかに当てはまる方（ラベルにカーソルを合わせると根拠が出ます）。<b>未成約</b>＝シートでXと記入済み。<b>未成約?</b>＝まだ判断材料がない方で、シートの記入か次のご予約で自動的に切り替わります。❌キャンセル＝来店に至らなかった方で、別の日に振り替えた方は↩︎振替として区別しています</div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">✅成約＝①体験より後の予約が入っている ②体験日以降に月謝・回数券の契約がある ③新規継続率測定シートの「成約」が◯、のどれかに当てはまる方（ラベルにカーソルを合わせると根拠が出ます）。<b>未成約</b>＝シートでXと記入済み。<b>未成約?</b>＝まだ判断材料がない方で、シートの記入か次のご予約で自動的に切り替わります。実態と違うときは各行の右のプルダウン（自動／✅成約／未成約）でその場で直せます。❌キャンセル＝来店に至らなかった方で、別の日に振り替えた方は↩︎振替として区別しています</div>';
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">経路は「新規継続率測定シート」とカウンセリングシートの「エミライズを何で知りましたか？」から自動反映しています。「?」付きはSTORESのデータからの推定なので、各行のプルダウンで選ぶと確定として保存されます</div>';
   if (stale(_seq)) return;
   app.innerHTML = html;
@@ -3778,6 +3799,26 @@ async function renderTrial() {
       if (error) { alert('保存できませんでした: ' + error.message); return; }
       const key = mid + '|' + cid;
       if (sel.value) manualSrc[key] = sel.value; else delete manualSrc[key];
+      renderTrial();
+    });
+  });
+  app.querySelectorAll('.lout').forEach(function(sel) {
+    sel.addEventListener('change', async function() {
+      const k = sel.dataset.key;
+      let error = null;
+      if (!sel.value) {
+        const r = await sb.from('crm_trial_manual').delete().eq('name_key', k);
+        error = r.error;
+      } else {
+        const r = await sb.from('crm_trial_manual').upsert({
+          name_key: k, outcome: sel.value, set_by: who || '', set_at: new Date().toISOString()
+        });
+        error = r.error;
+      }
+      sel.style.boxShadow = error ? '0 0 0 2px #b3261e' : '0 0 0 2px #4a8f6e';
+      setTimeout(function() { sel.style.boxShadow = ''; }, 1200);
+      if (error) { alert('保存できませんでした: ' + error.message); return; }
+      if (outcome[k]) outcome[k].manual_outcome = sel.value || null;
       renderTrial();
     });
   });
