@@ -2485,9 +2485,9 @@ async function renderStats(params) {
   const todayS = jstToday();
   const thisWk = weekStart(todayS);
 
-  const [res, custQ, shiftQ, trialQ, cxQ] = await Promise.all([
+  const [res, custQ, shiftQ, trialQ, cxQ, outQ] = await Promise.all([
     fetchRange(first, nextFirst),
-    fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,subscriptions'),
+    fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,name,subscriptions'),
     sb.from('crm_shifts').select('staff_name,date,kind').gte('date', first).lt('date', nextFirst).limit(2000),
     sb.from('crm_reservations').select('booking_start,menu,customer_name,store_tag,merchant_id,customer_id')
       .gte('booking_start', addDays(todayS, -120) + 'T00:00:00+09:00').lt('booking_start', nextFirst + 'T00:00:00+09:00')
@@ -2497,6 +2497,7 @@ async function renderStats(params) {
     sb.from('crm_reservations').select('store_tag,booking_start,status,customer_name')
       .gte('booking_start', first + 'T00:00:00+09:00').lt('booking_start', nextFirst + 'T00:00:00+09:00')
       .neq('status', 'accepted').limit(1000),
+    fetchTable('v_trial_outcomes', 'name_key,won', ['name_key']),
   ]);
   if (res.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(res.error.message) + '</div>'; return; }
   // 店舗別のキャンセル数（実施レッスンとの整合性表示用）
@@ -2506,8 +2507,19 @@ async function renderStats(params) {
     const st = r.store_tag || '店舗不明';
     cxByStore[st] = (cxByStore[st] || 0) + 1;
   });
+  // 成約の判定は体験タブと同じ台帳（v_trial_outcomes）を使う。
+  // ①次の予約 ②契約 ③会員メニューの予約 ④測定シート ⑤ボードでの手入力、が全部効く
+  const wonBy = {};
+  const outErr2 = (outQ && outQ.error) ? outQ.error.message : '';
+  ((outQ && outQ.data) || []).forEach(function(x) { if (x.won) wonBy[x.name_key] = true; });
   const rows = res.data || [];
   const custs = custQ.data || [];
+  const personOfS = {};
+  custs.forEach(function(cu) { personOfS[custKey(cu.merchant_id, cu.customer_id)] = nameKey(cu.name); });
+  function personKeyS(r) {
+    return personOfS[custKey(r.merchant_id, r.customer_id)] || nameKey(r.customer_name);
+  }
+  function isWonR(r) { return !!wonBy[personKeyS(r)]; }
   const monthShifts = shiftQ.data || [];
   const trials120 = trialQ.data || [];
 
@@ -2697,13 +2709,8 @@ async function renderStats(params) {
   const withNext = activeKeys.filter(function(k2) { return futSet[k2]; }).length;
   const nextRate = curMembers ? Math.round(withNext * 100 / curMembers) : 0;
   const TRIAL_TGT = { '金沢本店': 8, '金沢駅西店': 10, '富山東店': 8, '福井高柳店': 11, '天王寺店': 3 };  // 2026-08-03再配分: 福井厚め・金沢2店で18
-  // 成約の定義（2026-08-05大地決定）: 体験のお客様に「体験より後の予約」が入っていること
-  // （天王寺=ワンモアも同名なら同じ顧客キーになるため、同名の2回目予約で自動判定される）
-  const bookTimes = {};
-  rows.forEach(function(r) {
-    if (!r.customer_id) return;
-    (bookTimes[custKey(r.merchant_id, r.customer_id)] = bookTimes[custKey(r.merchant_id, r.customer_id)] || []).push(r.booking_start);
-  });
+  // 成約の定義: 体験タブと同じ（次の予約／契約／会員メニュー／測定シート／手入力）。
+  // 2026-09-19までは「次の予約があるか」だけを見ており、体験タブと数が合わなかった
   const trialByStore = {};
   let convM = 0;
   const convCourse = {};
@@ -2711,9 +2718,7 @@ async function renderStats(params) {
     if (!isTrialR0(r)) return;
     const st = r.store_tag || '店舗不明';
     trialByStore[st] = (trialByStore[st] || 0) + 1;
-    const k3 = custKey(r.merchant_id, r.customer_id);
-    const hasNext = (bookTimes[k3] || []).some(function(t) { return t > r.booking_start; }) || futSet[k3];
-    if (!hasNext) return;
+    if (!isWonR(r)) return;
     convM++;
     // 何を購入したか（月謝コース名→回数券→予約のみ）
     const cu = custs.find(function(c2) { return c2.merchant_id === r.merchant_id && String(c2.customer_id) === String(r.customer_id); });
@@ -2763,8 +2768,9 @@ async function renderStats(params) {
       + '<span><span class="badge" style="background:' + storeColor(st) + ';font-size:9.5px">' + esc(st) + '</span></span>'
       + '<span>' + a + ' / ' + TRIAL_TGT[st] + '</span></div>';
   });
-  html += '<div style="font-size:12.5px;margin-top:6px"><b>成約 ' + convM + '名</b>（次回予約あり=成約）' + (convDetail ? '<br><small style="color:var(--sub)">内訳: ' + esc(convDetail) + '</small>' : '') + '</div>'
-    + '<div style="font-size:11px;margin-top:4px;color:var(--sub)">体験数はSTORES同期で5分ごと自動更新。成約=体験より後の予約が入った人（天王寺は同名の2回目予約）。換算: 体験1名=成約60%×月3回×8,740円=+1.6万円/月</div>'
+  html += '<div style="font-size:12.5px;margin-top:6px"><b>成約 ' + convM + '名</b>（体験タブと同じ判定）' + (convDetail ? '<br><small style="color:var(--sub)">内訳: ' + esc(convDetail) + '</small>' : '') + '</div>'
+    + '<div style="font-size:11px;margin-top:4px;color:var(--sub)">体験数はSTORES同期で5分ごと自動更新。成約は体験タブと同じ判定（①体験より後の予約 ②契約 ③会員メニューの予約 ④継続率測定シート ⑤ボードでの手入力）なので、2つの画面で数が一致します。換算: 体験1名=成約60%×月3回×8,740円=+1.6万円/月</div>'
+    + (outErr2 ? '<div class="mhead warn">⚠️ 成約の判定データを読み込めませんでした（' + esc(outErr2) + '） — 成約数が実際より少なく出ている可能性があります</div>' : '')
     + '</div>';
   // 良気くん: LTV・定着
   html += '<div style="border:1.5px solid #5a67a5;border-radius:12px;padding:10px 12px">'
@@ -2905,8 +2911,7 @@ async function renderStats(params) {
     o.lessons++;
     if (isTrialR(r) && r.booking_start < nowIso) {
       o.trial++;
-      const subs = subsOf[custKey(r.merchant_id, r.customer_id)] || [];
-      if (subs.length > 0) o.conv++;
+      if (isWonR(r)) o.conv++;   // 体験タブと同じ判定に統一（旧: 月謝を持っていれば成約）
     }
   });
   custs.forEach(function(cu) {
@@ -2931,7 +2936,7 @@ async function renderStats(params) {
   if (smKeys.length) {
     html += '<h3 style="margin:10px 2px 4px">🏬 店舗サマリー</h3>';
     html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
-      + '<th>店舗</th><th>レッスン数</th><th>会員数</th><th>休会</th><th>体験来店</th><th>成約</th><th>成約率</th><th>退会</th><th>退会率</th></tr></thead><tbody>';
+      + '<th>店舗</th><th>レッスン数</th><th>キャンセル</th><th>会員数</th><th>休会</th><th>体験来店</th><th>成約</th><th>成約率</th><th>退会</th><th>退会率</th></tr></thead><tbody>';
     const tot = { lessons: 0, members: 0, susp: 0, quit: 0, trial: 0, conv: 0 };
     smKeys.forEach(function(st) {
       const o = sm[st];
@@ -2940,6 +2945,7 @@ async function renderStats(params) {
       const qr = (o.members + o.quit) ? Math.round(o.quit * 1000 / (o.members + o.quit)) / 10 : null;
       html += '<tr><td><a href="javascript:void(0)" class="plopen" data-st="' + esc(st) + '" style="text-decoration:none"><span class="badge" style="background:' + storeColor(st) + '">' + esc(st) + ' ▾</span></a></td>'
         + '<td style="font-weight:700">' + o.lessons + '</td>'
+        + '<td>' + (cxByStore[st] ? '<span style="color:#b3261e">' + cxByStore[st] + '</span>' : 0) + '</td>'
         + '<td>' + o.members + '名</td>'
         + '<td>' + (o.susp || 0) + '名</td>'
         + '<td>' + o.trial + '名</td>'
