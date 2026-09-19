@@ -3387,7 +3387,7 @@ async function renderTrial() {
   rows.forEach(function(r) {
     if (r.customer_id && !seenId[r.customer_id]) { seenId[r.customer_id] = true; needIds.push(r.customer_id); }
   });
-  const [custQ, srcQ, nameQ, outQ] = await Promise.all([
+  const [custQ, srcQ, nameQ, outQ, syncQ] = await Promise.all([
     needIds.length
       ? sb.from('crm_customers').select('merchant_id,customer_id,name,channel,line_linked,profile_fields,memo')
           .in('customer_id', needIds.slice(0, 900))
@@ -3396,8 +3396,17 @@ async function renderTrial() {
     fetchTable('crm_lead_source_names', 'name_key,store,source,origin', ['name_key', 'store']),
     fetchTable('v_trial_outcomes', 'name_key,trial_date,next_date,after_count,had_visit,had_cancel,'
                + 'contract_date,contract_name,sheet_won,sheet_lost,sheet_course,won,'
-               + 'manual_outcome,manual_note,manual_by', ['name_key']),
+               + 'manual_outcome,manual_note,manual_by,member_date', ['name_key']),
+    sb.from('crm_trial_signups').select('updated_at')
+      .order('updated_at', { ascending: false }).limit(1),
   ]);
+  // 測定シートの取り込みが止まると、成約も経路も静かに古いままになる。
+  // 前回に取り込めた時刻を見て、止まっていれば画面で知らせる
+  let syncAgoH = null;
+  const syncRow = ((syncQ && syncQ.data) || [])[0];
+  if (syncRow && syncRow.updated_at) {
+    syncAgoH = (Date.now() - new Date(syncRow.updated_at).getTime()) / 3600000;
+  }
   // 体験のその後（体験より後の日に予約が入っていれば成約とみなす）
   // 取得に失敗すると全員「未成約」に見えてしまうので、黙って落とさず画面に出す
   const outcome = {};
@@ -3444,13 +3453,14 @@ async function renderTrial() {
   function isWon(o) {
     if (!o) return false;
     if (o.manual_outcome) return o.manual_outcome === 'won';   // 人が直した内容が最優先
-    return !!(o.won || o.next_date || o.contract_date || o.sheet_won);
+    return !!(o.won || o.next_date || o.contract_date || o.member_date || o.sheet_won);
   }
   function wonWhy(o) {
     const why = [];
     if (o.manual_outcome === 'won') why.push('ボードで成約に直されています' + (o.manual_by ? '（' + o.manual_by + '）' : ''));
     if (o.next_date) why.push(o.next_date + ' に次の予約（以降 ' + (o.after_count || 0) + '件）');
     if (o.contract_date) why.push(o.contract_date + ' に契約' + (o.contract_name ? '（' + o.contract_name + '）' : ''));
+    if (o.member_date) why.push(o.member_date + ' に会員メニューを予約');
     if (o.sheet_won) why.push('継続率測定シートで成約◯' + (o.sheet_course ? '（' + o.sheet_course + '）' : ''));
     return why.join(' ／ ');
   }
@@ -3767,13 +3777,20 @@ async function renderTrial() {
   html += kanzashiHtml(byStore);
   html += listHtml(subset, !selStore);
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
+  if (syncAgoH !== null && syncAgoH > 26) {
+    const d = Math.floor(syncAgoH / 24);
+    html += '<div class="mhead warn">⚠️ 継続率測定シートの取り込みが'
+      + (d >= 1 ? d + '日' : Math.floor(syncAgoH) + '時間') + '止まっています'
+      + '（前回: ' + new Date(syncRow.updated_at).toLocaleString('ja-JP', { timeZone: TZ }) + '）'
+      + ' — 成約と経路が最新ではない可能性があります。大地さんにお知らせください</div>';
+  }
   if (outErr || srcErr) {
     html += '<div class="mhead warn">⚠️ データを読み込めませんでした'
       + (outErr ? '（成約判定: ' + esc(outErr) + '）' : '')
       + (srcErr ? '（流入経路: ' + esc(srcErr) + '）' : '')
       + ' — 表示が正しくない可能性があります</div>';
   }
-  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">✅成約＝①体験より後の予約が入っている ②体験日以降に月謝・回数券の契約がある ③新規継続率測定シートの「成約」が◯、のどれかに当てはまる方（ラベルにカーソルを合わせると根拠が出ます）。<b>未成約</b>＝シートでXと記入済み。<b>未成約?</b>＝まだ判断材料がない方で、シートの記入か次のご予約で自動的に切り替わります。実態と違うときは各行の右のプルダウン（自動／✅成約／未成約）でその場で直せます。❌キャンセル＝来店に至らなかった方で、別の日に振り替えた方は↩︎振替として区別しています</div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">✅成約＝①体験より後の予約が入っている ②体験日以降に月謝・回数券の契約がある ③会員メニューを予約している（キャンセル分も含む） ④新規継続率測定シートの「成約」が◯、のどれかに当てはまる方（ラベルにカーソルを合わせると根拠が出ます）。<b>未成約</b>＝シートでXと記入済み。<b>未成約?</b>＝まだ判断材料がない方で、シートの記入か次のご予約で自動的に切り替わります。実態と違うときは各行の右のプルダウン（自動／✅成約／未成約）でその場で直せます。❌キャンセル＝来店に至らなかった方で、別の日に振り替えた方は↩︎振替として区別しています</div>';
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">経路は「新規継続率測定シート」とカウンセリングシートの「エミライズを何で知りましたか？」から自動反映しています。「?」付きはSTORESのデータからの推定なので、各行のプルダウンで選ぶと確定として保存されます</div>';
   if (stale(_seq)) return;
   app.innerHTML = html;
