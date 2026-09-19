@@ -88,7 +88,8 @@
   .tabs a { padding:7px 14px; border:1px solid var(--line); border-radius:999px; background:#fff; text-decoration:none; color:inherit; font-size:13px; }
   .tabs a.on { background:var(--accent); color:#fff; border-color:var(--accent); }
   .chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
-  .chips a { padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:#fff; text-decoration:none; color:inherit; font-size:12px; }
+  .chips a, .chips .chip { padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:#fff; text-decoration:none; color:inherit; font-size:12px; }
+  .chips .chip a { padding:0; border:none; background:none; border-radius:0; }
   .chips a.on { background:#1f2d2a; color:#fff; border-color:#1f2d2a; }
   .selbar { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
   .selbar select, .selbar button, .selbar input { border:1px solid var(--line); border-radius:10px; padding:8px 10px; font-size:14px; background:#fff; }
@@ -267,7 +268,8 @@
   .rep.zebra tbody tr.grp td,
   .rep.zebra tbody tr.grp td:first-child { background:#c9d6ce; }
   input, select, textarea { background:var(--bg); border:none !important; box-shadow:inset 3px 3px 6px var(--sd), inset -3px -3px 6px var(--sl); border-radius:12px; outline:none; }
-  .daynav button, .selbar button, .tabs a, .chips a, .tagbtn, .mic, .searchbar .btn { background:var(--bg); border:none; box-shadow:3px 3px 7px var(--sd), -3px -3px 7px var(--sl); }
+  .daynav button, .selbar button, .tabs a, .chips a, .chips .chip, .tagbtn, .mic, .searchbar .btn { background:var(--bg); border:none; box-shadow:3px 3px 7px var(--sd), -3px -3px 7px var(--sl); }
+  .chips .chip a { box-shadow:none; background:none; }
   .tabs a.on, .chips a.on { background:var(--bg); color:var(--accent); font-weight:800; border:none; box-shadow:inset 3px 3px 6px var(--sd), inset -3px -3px 6px var(--sl); }
   .tagbtn.on { background:var(--accent); color:#fff; box-shadow:inset 3px 3px 6px rgba(12,60,45,.45); }
   .tagbtn.warn.on { background:#b3261e; box-shadow:inset 3px 3px 6px rgba(90,15,10,.45); }
@@ -3386,7 +3388,9 @@ function leadBadge(v) {
 async function renderTrial() {
   const _seq = newRender();
   app.innerHTML = '<div class="empty">読み込み中…</div>';
-  const selStore = decodeURIComponent((location.hash.split('/')[2] || ''));
+  const hPath = location.hash.split('?')[0];
+  const hQuery = new URLSearchParams(location.hash.split('?')[1] || '');
+  const selStore = decodeURIComponent((hPath.split('/')[2] || ''));
   const today = jstToday();
   const from = addDays(today, -120);
   const to = addDays(today, 92);
@@ -3448,7 +3452,24 @@ async function renderTrial() {
   }
   const manualSrc = {};
   ((srcQ && srcQ.data) || []).forEach(function(x) { manualSrc[(x.merchant_id || '') + '|' + x.customer_id] = x.source; });
-  const selSrc = decodeURIComponent((location.hash.split('/')[3] || ''));
+  const selSrc = decodeURIComponent((hPath.split('/')[3] || ''));
+  const selWhen = hQuery.get('when') || '';   // 時期の絞り込み（これから／今月／先月…）
+  const selRes  = hQuery.get('res')  || '';   // 結果の絞り込み（成約／未成約／キャンセル／振替）
+  // 同じチップをもう一度押すと解除。店舗と経路はパス、それ以外はクエリで持つ
+  function linkT(key, val) {
+    const q2 = new URLSearchParams(hQuery.toString());
+    if (!val || q2.get(key) === val) q2.delete(key); else q2.set(key, val);
+    const base = '#/trial' + (selStore ? '/' + encodeURIComponent(selStore) : (selSrc ? '/' : ''))
+      + (selSrc ? '/' + encodeURIComponent(selSrc) : '');
+    const qs = q2.toString();
+    return base + (qs ? '?' + qs : '');
+  }
+  function chipT(key, val, label, style, title) {
+    const on = hQuery.get(key) === val;
+    return '<a href="' + linkT(key, val) + '"' + (on ? ' class="on"' : '')
+      + (style ? ' style="' + style + '"' : '')
+      + (title ? ' title="' + esc(title) + '"' : '') + '>' + label + '</a>';
+  }
   function isPortal(r) { return (r.menu || '').indexOf('かんざし') >= 0; }
   function srcOf(r) { return leadSourceOf(r, custBy, manualSrc, isPortal(r), srcByName, personKey); }
   // 「いつ予約が入ったか」と、キャンセルなら「いつ取り消されたか」を並べる。
@@ -3553,12 +3574,12 @@ async function renderTrial() {
     const nextYm2 = addDays(ym + '-28', 7).slice(0, 7);
     const nm2 = c.filter(function(r) { return dOf(r).slice(0, 7) === nextYm2; }).length;
     return '<div class="chips">'
-      + '<a style="pointer-events:none;background:var(--accent);color:#fff">🆕 これからの体験 ' + fu + '件</a>'
-      + '<a style="pointer-events:none">今月 ' + tm + '件</a>'
-      + (nm2 ? '<a style="pointer-events:none;background:#5a67a5;color:#fff">翌月 ' + nm2 + '件</a>' : '')
-      + '<a style="pointer-events:none">先月 ' + lm + '件</a>'
-      + '<a style="pointer-events:none">今週 ' + wk + '件</a>'
-      + (po ? '<a style="pointer-events:none">🔖 かんざし 今月' + po + '件</a>' : '')
+      + chipT('when', 'fut', '🆕 これからの体験 ' + fu + '件', 'background:var(--accent);color:#fff', 'まだ来店していない体験のご予約')
+      + chipT('when', 'cur', '今月 ' + tm + '件', '', '')
+      + (nm2 ? chipT('when', 'next', '翌月 ' + nm2 + '件', 'background:#5a67a5;color:#fff', '') : '')
+      + chipT('when', 'last', '先月 ' + lm + '件', '', '')
+      + chipT('when', 'week', '今週 ' + wk + '件', '', '')
+      + (po ? chipT('when', 'kanzashi', '🔖 かんざし 今月' + po + '件', '', 'かんざし経由の今月のご予約') : '')
       + '</div>' + outcomeChips(subset) + srcChips(subset);
   }
   // 月ごとの内訳。同じ方・同じ日・同じ店舗の重複取り込み（STORESとワンモア、
@@ -3608,11 +3629,14 @@ async function renderTrial() {
     const cvr = visited ? Math.round(won / visited * 100) : 0;
     const cxr = people ? Math.round(cxOnly / people * 100) : 0;
     return '<div class="chips" style="margin-top:2px">'
-      + '<a style="pointer-events:none;background:#0c7a3e;color:#fff" title="来店済みのうち、体験より後の日に予約が入った方">'
-      + '✅ 成約 ' + won + '/' + visited + '名（' + cvr + '%）</a>'
-      + '<a style="pointer-events:none;background:#8a2b22;color:#fff" title="体験を予約したが来店に至らなかった方（振替を除く）">'
-      + '❌ キャンセル ' + cxOnly + '/' + people + '名（' + cxr + '%）</a>'
-      + (resched ? '<a style="pointer-events:none;background:#e4d7c0" title="キャンセル後に別の日で来店された方">↩︎ 振替 ' + resched + '名</a>' : '')
+      + chipT('res', 'won', '✅ 成約 ' + won + '/' + visited + '名（' + cvr + '%）',
+              'background:#0c7a3e;color:#fff', '来店済みのうち、体験より後の日に予約が入った方')
+      + chipT('res', 'lost', '未成約 ' + (visited - won) + '名',
+              'background:#f0dede;color:#8a2b22', '来店されたが、まだ次のご予約・ご契約が確認できていない方')
+      + chipT('res', 'cx', '❌ キャンセル ' + cxOnly + '/' + people + '名（' + cxr + '%）',
+              'background:#8a2b22;color:#fff', '体験を予約したが来店に至らなかった方（振替を除く）')
+      + (resched ? chipT('res', 'resched', '↩︎ 振替 ' + resched + '名', 'background:#e4d7c0',
+                         'キャンセル後に別の日で来店された方') : '')
       + '</div>';
   }
   // かんざし連携の実績。予約メニューに「(かんざしから自動生成)」と残るので確実に数えられる。
@@ -3695,12 +3719,12 @@ async function renderTrial() {
     if (needSrc.length) {
       o += '<div style="font-size:12.5px;margin-bottom:4px"><b>流入経路が未記入 ' + needSrc.length + '名</b>'
         + '<span style="color:var(--sub)">（カウンセリングシートか継続率測定シートに書けば6時間以内に自動で入ります。急ぐときは右の枠から直接選べます）</span></div>'
-        + '<div class="chips">' + needSrc.map(function(x) { return '<a style="pointer-events:auto">' + x + '</a>'; }).join('') + '</div>';
+        + '<div class="chips">' + needSrc.map(function(x) { return '<span class="chip">' + x + '</span>'; }).join('') + '</div>';
     }
     if (needOut.length) {
       o += '<div style="font-size:12.5px;margin:8px 0 4px"><b>成約かどうか未確定 ' + needOut.length + '名</b>'
         + '<span style="color:var(--sub)">（継続率測定シートの「成約」欄に◯／Xを入れると確定します。次のご予約や契約が入れば自動で成約になります）</span></div>'
-        + '<div class="chips">' + needOut.map(function(x) { return '<a style="pointer-events:auto">' + x + '</a>'; }).join('') + '</div>';
+        + '<div class="chips">' + needOut.map(function(x) { return '<span class="chip">' + x + '</span>'; }).join('') + '</div>';
     }
     return o + '</div>';
   }
@@ -3714,17 +3738,22 @@ async function renderTrial() {
     const order = LEAD_SOURCES.concat(['未設定']).filter(function(k) { return tally[k]; });
     if (!order.length) return '';
     const base = '#/trial' + (selStore ? '/' + encodeURIComponent(selStore) : '/');
+    const qk = hQuery.toString() ? '?' + hQuery.toString() : '';
     let o = '<div class="chips" style="margin-top:2px">'
-      + '<a href="' + base + '"' + (!selSrc ? ' class="on"' : '') + '>経路すべて ' + subset.length + '</a>';
+      + '<a href="' + base + qk + '"' + (!selSrc ? ' class="on"' : '') + '>経路すべて ' + subset.length + '</a>';
     order.forEach(function(k) {
-      o += '<a href="' + base + '/' + encodeURIComponent(k) + '"' + (selSrc === k ? ' class="on"' : '')
+      o += '<a href="' + base + '/' + encodeURIComponent(k) + qk + '"' + (selSrc === k ? ' class="on"' : '')
         + ' style="border-left:4px solid ' + (LEAD_STYLE[k] || LEAD_STYLE['未設定']) + '">'
         + esc(k) + ' ' + tally[k] + (tallyM[k] ? '<span style="color:var(--sub)">（今月' + tallyM[k] + '）</span>' : '') + '</a>';
     });
     return o + '</div>';
   }
   function listHtml(subset, showStore) {
-    if (!subset.length) { return '<div class="empty">この店舗の体験予約はまだありません（STORESで体験受付が始まると自動で表示されます）</div>'; }
+    if (!subset.length) {
+      return (selWhen || selRes)
+        ? '<div class="empty">この絞り込みに当てはまる方はいません。もう一度チップを押すと解除できます</div>'
+        : '<div class="empty">この店舗の体験予約はまだありません（STORESで体験受付が始まると自動で表示されます）</div>';
+    }
     // これからの体験（未実施）を先に強調表示＝新規対応の準備がすぐ分かる
     const future = subset.filter(function(r) { return r.booking_start >= nowIso && !isCx(r); })
       .sort(function(a, b) { return (a.booking_start || '').localeCompare(b.booking_start || ''); });
@@ -3780,17 +3809,40 @@ async function renderTrial() {
 
   let html = '<h2>🎫 体験・初回レッスン予約（広告/Lステップ流入の指標）</h2>';
   html += '<div class="chips">';
-  html += '<a href="#/trial' + (selSrc ? '//' + encodeURIComponent(selSrc) : '') + '"' + (!selStore ? ' class="on"' : '') + '>全店舗 ' + rows.length + '</a>';
+  const qsKeep = hQuery.toString() ? '?' + hQuery.toString() : '';
+  html += '<a href="#/trial' + (selSrc ? '//' + encodeURIComponent(selSrc) : '') + qsKeep + '"' + (!selStore ? ' class="on"' : '') + '>全店舗 ' + rows.length + '</a>';
   keys.forEach(function(k) {
     const sfx = selSrc ? '/' + encodeURIComponent(selSrc) : '';
-    html += '<a href="#/trial/' + encodeURIComponent(k) + sfx + '"' + (selStore === k ? ' class="on"' : '') + '>' + esc(k) + ' ' + stores[k].length + '</a>';
+    html += '<a href="#/trial/' + encodeURIComponent(k) + sfx + qsKeep + '"' + (selStore === k ? ' class="on"' : '') + '>' + esc(k) + ' ' + stores[k].length + '</a>';
   });
   html += '</div>';
 
   const byStore = selStore ? (stores[selStore] || []) : rows;
   html += statChips(byStore);
   html += todoHtml(byStore);
-  const subset = selSrc ? byStore.filter(function(r) { return srcOf(r).src === selSrc; }) : byStore;
+  function inWhen(r) {
+    const d = dOf(r);
+    if (selWhen === 'fut')  return r.booking_start >= nowIso && !isCx(r);
+    if (selWhen === 'cur')  return !isPortal(r) && d.slice(0, 7) === ym;
+    if (selWhen === 'next') return !isPortal(r) && d.slice(0, 7) === addDays(ym + '-28', 7).slice(0, 7);
+    if (selWhen === 'last') return !isPortal(r) && d.slice(0, 7) === lastYm;
+    if (selWhen === 'week') return !isPortal(r) && d >= wkStart && d < wkEnd;
+    if (selWhen === 'kanzashi') return isPortal(r) && d.slice(0, 7) === ym;
+    return true;
+  }
+  function inRes(r) {
+    if (!selRes) return true;
+    const o = outcome[personKey(r)] || outcome[nameKey(r.customer_name)] || {};
+    if (selRes === 'cx')      return !!(o.had_cancel && !o.had_visit);
+    if (selRes === 'resched') return !!(o.had_cancel && o.had_visit);
+    const visited = !!(o.trial_date && o.trial_date < jstToday());
+    if (selRes === 'won')  return visited && isWon(o);
+    if (selRes === 'lost') return visited && !isWon(o);
+    return true;
+  }
+  let subset = selSrc ? byStore.filter(function(r) { return srcOf(r).src === selSrc; }) : byStore;
+  if (selWhen) subset = subset.filter(inWhen);
+  if (selRes)  subset = subset.filter(inRes);
   html += kanzashiHtml(byStore);
   html += listHtml(subset, !selStore);
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
