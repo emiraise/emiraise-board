@@ -2494,7 +2494,7 @@ async function renderStats(params) {
       .eq('status', 'accepted')
       .or('menu.ilike.%初回%,menu.ilike.%体験%,menu.ilike.%キャンペーン%,menu.ilike.%かんざし%,customer_name.ilike.%新規%')
       .limit(1000),
-    sb.from('crm_reservations').select('store_tag,booking_start,status,customer_name')
+    sb.from('crm_reservations').select('store_tag,booking_start,status,customer_name,menu')
       .gte('booking_start', first + 'T00:00:00+09:00').lt('booking_start', nextFirst + 'T00:00:00+09:00')
       .neq('status', 'accepted').limit(1000),
     fetchTable('v_trial_outcomes', 'name_key,won', ['name_key']),
@@ -2502,10 +2502,12 @@ async function renderStats(params) {
   if (res.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(res.error.message) + '</div>'; return; }
   // 店舗別のキャンセル数（実施レッスンとの整合性表示用）
   const cxByStore = {};
+  let cxTrial = 0;   // そのうち体験のキャンセル（体験数には入れず、別に出す）
   ((cxQ && cxQ.data) || []).forEach(function(r) {
     if (INTERNAL_NAME_RE.test(r.customer_name || '')) return;
     const st = r.store_tag || '店舗不明';
     cxByStore[st] = (cxByStore[st] || 0) + 1;
+    if (/初回|体験|キャンペーン|かんざし/.test(r.menu || '') || /新規|体験/.test(r.customer_name || '')) cxTrial++;
   });
   // 成約の判定は体験タブと同じ台帳（v_trial_outcomes）を使う。
   // ①次の予約 ②契約 ③会員メニューの予約 ④測定シート ⑤ボードでの手入力、が全部効く
@@ -2712,13 +2714,16 @@ async function renderStats(params) {
   // 成約の定義: 体験タブと同じ（次の予約／契約／会員メニュー／測定シート／手入力）。
   // 2026-09-19までは「次の予約があるか」だけを見ており、体験タブと数が合わなかった
   const trialByStore = {};
-  let convM = 0;
+  let convM = 0, trialDone = 0, convDone = 0;
   const convCourse = {};
   rows.forEach(function(r) {
     if (!isTrialR0(r)) return;
     const st = r.store_tag || '店舗不明';
     trialByStore[st] = (trialByStore[st] || 0) + 1;
+    const done = r.booking_start < nowIso;   // 来店済みか、これからのご予約か
+    if (done) trialDone++;
     if (!isWonR(r)) return;
+    if (done) convDone++;
     convM++;
     // 何を購入したか（月謝コース名→回数券→予約のみ）
     const cu = custs.find(function(c2) { return c2.merchant_id === r.merchant_id && String(c2.customer_id) === String(r.customer_id); });
@@ -2761,6 +2766,9 @@ async function renderStats(params) {
   html += '<div style="border:1.5px solid #b0743a;border-radius:12px;padding:10px 12px">'
     + '<div style="font-weight:800;margin-bottom:6px">🚀 マーケティング（責任者：大地）</div>'
     + '<div style="font-size:13px;margin:3px 0">体験数 <b style="font-size:18px">' + trialCount + '</b> / 目標' + trialTotalTgt + '名</div>'
+    + '<div style="font-size:11px;color:var(--sub);margin:-2px 0 3px">内訳: 来店済み <b>' + trialDone + '</b> ・ これからのご予約 <b>' + (trialCount - trialDone) + '</b>'
+    + '（キャンセル <b style="color:#b3261e">' + cxTrial + '</b>件は体験数に含みません'
+    + (trialCount + cxTrial ? '＝予約' + (trialCount + cxTrial) + '件中' + Math.round(cxTrial * 100 / (trialCount + cxTrial)) + '%' : '') + '）</div>'
     + gbar(trialCount * 100 / trialTotalTgt, '#b0743a');
   Object.keys(TRIAL_TGT).forEach(function(st) {
     const a = trialByStore[st] || 0;
@@ -2768,8 +2776,11 @@ async function renderStats(params) {
       + '<span><span class="badge" style="background:' + storeColor(st) + ';font-size:9.5px">' + esc(st) + '</span></span>'
       + '<span>' + a + ' / ' + TRIAL_TGT[st] + '</span></div>';
   });
-  html += '<div style="font-size:12.5px;margin-top:6px"><b>成約 ' + convM + '名</b>（体験タブと同じ判定）' + (convDetail ? '<br><small style="color:var(--sub)">内訳: ' + esc(convDetail) + '</small>' : '') + '</div>'
-    + '<div style="font-size:11px;margin-top:4px;color:var(--sub)">体験数はSTORES同期で5分ごと自動更新。成約は体験タブと同じ判定（①体験より後の予約 ②契約 ③会員メニューの予約 ④継続率測定シート ⑤ボードでの手入力）なので、2つの画面で数が一致します。換算: 体験1名=成約60%×月3回×8,740円=+1.6万円/月</div>'
+  html += '<div style="font-size:12.5px;margin-top:6px"><b>成約 ' + convDone + '名</b>'
+    + '<span style="color:var(--sub);font-size:11.5px">（来店' + trialDone + '名のうち '
+    + (trialDone ? Math.round(convDone * 100 / trialDone) : 0) + '%）'
+    + (convM > convDone ? '＋これからの方で ' + (convM - convDone) + '名' : '') + '</span>' + (convDetail ? '<br><small style="color:var(--sub)">内訳: ' + esc(convDetail) + '</small>' : '') + '</div>'
+    + '<div style="font-size:11px;margin-top:4px;color:var(--sub)">体験数はSTORES同期で5分ごと自動更新。体験数は<b>キャンセルを除いた確定予約</b>の件数で、まだ来ていない今月のご予約も含みます。成約率は「来店済み」だけで計算しています。成約は体験タブと同じ判定（①体験より後の予約 ②契約 ③会員メニューの予約 ④継続率測定シート ⑤ボードでの手入力）なので、2つの画面で数が一致します。換算: 体験1名=成約60%×月3回×8,740円=+1.6万円/月</div>'
     + (outErr2 ? '<div class="mhead warn">⚠️ 成約の判定データを読み込めませんでした（' + esc(outErr2) + '） — 成約数が実際より少なく出ている可能性があります</div>' : '')
     + '</div>';
   // 良気くん: LTV・定着
