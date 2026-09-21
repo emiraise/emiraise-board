@@ -551,7 +551,7 @@ async function renderDay(dateStr) {
       const st = (r.staff_names && r.staff_names[0]) || '担当未設定';
       (groups[st] = groups[st] || []).push(r);
     });
-    const gnames = Object.keys(groups).sort();
+    const gnames = Object.keys(groups).filter(function(n) { return !isRetired(n); }).sort();
     // スタッフ別の件数サマリー（✓チェックイン・📝カルテ済み）
     html += '<div class="chips">';
     gnames.forEach(function(st) {
@@ -566,16 +566,17 @@ async function renderDay(dateStr) {
     });
     // シフト上「出勤」なのに予約が入っていないスタッフ（こうじ・大地など）も表示
     dayShiftsL.filter(function(s) { return s.kind === 'work'; }).forEach(function(s) {
+      if (isRetired(s.staff_name)) return;
       if (gnames.some(function(g) { return nw(g) === nw(s.staff_name); })) return;
       html += '<a style="pointer-events:none">☀ ' + esc(s.staff_name) + ' 出勤'
         + (s.code ? '（' + esc(s.code) + '）' : '') + (s.store ? '【' + esc(s.store) + '】' : '') + '・予約0件</a>';
     });
     // 会議・研修・出張などのスタッフ（青）
-    dayShiftsL.filter(function(s) { return s.kind === 'other'; }).forEach(function(s) {
+    dayShiftsL.filter(function(s) { return s.kind === 'other' && !isRetired(s.staff_name); }).forEach(function(s) {
       html += '<a style="pointer-events:none;color:#5a67a5">📅 ' + esc(s.staff_name) + ' ' + esc(s.label || '') + '</a>';
     });
     // 今日休みのスタッフを赤チップで表示
-    dayShiftsL.filter(function(s) { return s.kind === 'off'; }).forEach(function(s) {
+    dayShiftsL.filter(function(s) { return s.kind === 'off' && !isRetired(s.staff_name); }).forEach(function(s) {
       html += '<a class="offchip">🌙 ' + esc(s.staff_name) + ' ' + esc(s.label || '休み') + '</a>';
     });
     html += '</div><div class="storecols">';
@@ -1630,7 +1631,7 @@ function shiftStaffs(shifts, dateStr) {
   // その日にシフト行がある人全員（休み・会議の人も行を出して見える化する）
   const s = {};
   shifts.forEach(function(x) { if (!dateStr || x.date === dateStr) s[x.staff_name] = true; });
-  return Object.keys(s);
+  return Object.keys(s).filter(function(n) { return !isRetired(n); });
 }
 
 // ── 休み・ブロック枠（ボード側管理。STORES APIはシフト/ブロックを提供しない） ──
@@ -1667,8 +1668,20 @@ function blocksFor(blocks, staffName, dateStr) {
 }
 // スタッフの表示順（2026-08-28 大地指示・全ビュー共通）
 const STAFF_ORDER = ['林　大地', '齋藤 良気', 'こうじ', 'あやな', 'ねね', 'まこ', 'まゆ', 'ゆうか', 'ゆき', 'あこ', 'なおみ', 'ももか'];
-// 退職者。シフト表に名前が残っていても分析には出さない（2026-09-11 大地さん指示）
+// 退職者。予約・シフトに名前が残っていても、どの画面にも一切出さない（2026-09-22 大地さん指示）
 const RETIRED_STAFF = ['みわ'];
+// 予約が無い期間でも必ず名簿に出す人。良気さんはシフト表に載らないため抜け落ちていた
+const ALWAYS_STAFF = ['齋藤 良気'];
+function isRetired(n) {
+  return RETIRED_STAFF.some(function(x) { return nw(x) === nw(n); });
+}
+function withAlways(arr) {
+  const out = arr.filter(function(n) { return !isRetired(n); });
+  ALWAYS_STAFF.forEach(function(n) {
+    if (!out.some(function(x) { return nw(x) === nw(n); })) out.push(n);
+  });
+  return out;
+}
 // シフト表の店舗表記 → ボード上の店舗名
 const SHIFT_STORE_FULL = { '本店': '金沢本店', '駅西': '金沢駅西店', '富山東': '富山東店',
                            '福井高柳': '福井高柳店', '天王寺': '天王寺店' };
@@ -1685,7 +1698,7 @@ function unionStaffs(rows, blocks) {
   const s = {};
   rows.forEach(function(r) { resStaffs(r).forEach(function(n) { s[n] = true; }); });
   blocks.forEach(function(b) { if (b.staff_name) s[b.staff_name] = true; });
-  return Object.keys(s).sort();
+  return Object.keys(s).filter(function(n) { return !isRetired(n); }).sort();
 }
 function wireTrackQuickAdd() {
   // タイムラインの空き部分をクリック → その場所（スタッフ×日付×時間）でブロック追加フォームを開く
@@ -1798,7 +1811,7 @@ function resStaffs(r) { return (r.staff_names && r.staff_names.length) ? r.staff
 function staffSet(rows) {
   const s = {};
   rows.forEach(function(r) { resStaffs(r).forEach(function(n) { s[n] = true; }); });
-  return Object.keys(s).sort();
+  return Object.keys(s).filter(function(n) { return !isRetired(n); }).sort();
 }
 function byStaff(rows, name) {
   return rows.filter(function(r) { return resStaffs(r).some(function(n) { return nw(n) === nw(name); }); });
@@ -1911,6 +1924,7 @@ async function renderTimeline(params) {
     (dayStBlocks || []).forEach(function(b) {
       if (b.date === date && !staffs.some(function(x) { return nw(x) === nw(b.staff_name); })) staffs.push(b.staff_name);
     });
+    staffs = withAlways(staffs);   // 良気さんはシフト表に載らないので、予約が無い日も行を出す
     // 店舗で絞り込み中は、その店舗に予約またはシフトがある人だけ表示
     if (storeSel) {
       staffs = staffs.filter(function(st) {
@@ -1991,7 +2005,7 @@ async function renderTimeline(params) {
     if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
     const data = resQ.data || [];
     const wkMeta = await fetchCustMeta(data);
-    const staffs = unionStaffs(data, blocks);
+    let staffs = unionStaffs(data, blocks);
     // シフト表に載っている人（大地さん等・予約ゼロでも）を選択肢に含める
     shiftStaffs(shifts, null).forEach(function(sn) {
       if (!staffs.some(function(x) { return nw(x) === nw(sn); })) staffs.push(sn);
@@ -1999,7 +2013,7 @@ async function renderTimeline(params) {
     (stBlocksAll || []).forEach(function(b) {
       if (!staffs.some(function(x) { return nw(x) === nw(b.staff_name); })) staffs.push(b.staff_name);
     });
-    sortStaffs(staffs);
+    staffs = sortStaffs(withAlways(staffs));
     if (!staff) {
       const mine = await myStaffName();
       staff = staffs.find(function(n) { return nw(n) === nw(mine); }) || staffs[0] || '';
@@ -2147,8 +2161,10 @@ async function renderReport(params) {
   });
 
   const agg = {};
+  ALWAYS_STAFF.forEach(function(n) { agg[n] = { count: 0, done: 0, mins: 0, rev: 0, kd: 0 }; });
   rows.forEach(function(r) {
     const st = resStaffs(r)[0];
+    if (isRetired(st)) return;
     const a = (agg[st] = agg[st] || { count: 0, done: 0, mins: 0, rev: 0, kd: 0 });
     a.count++;
     if (checks[r.reservation_id]) a.done++;
@@ -4088,7 +4104,7 @@ async function renderData(params) {
     const band = bandOf(hh);
     if (!band) return;
     const staff = (r.staff_names && r.staff_names[0]) || '担当なし';
-    if (RETIRED_STAFF.indexOf(staff) >= 0) return;
+    if (isRetired(staff)) return;
     staffSet[staff] = true;
     if (!hit(selStores, r.store_tag || '')) return;
     if (!hit(selDows, wd)) return;
@@ -4147,7 +4163,7 @@ async function renderData(params) {
   const stores = STORE_ORDER_ALL.slice();
   html += chipRow('店舗', stores.map(function(x) { return { v: x, t: x }; }), selStores, 'store');
   html += chipRow('曜日', [1,2,3,4,5,6,0].map(function(w) { return { v: w, t: DOW_LABEL[w] + '曜' }; }), selDows, 'dow');
-  html += chipRow('担当', Object.keys(staffSet).sort(function(a, b) {
+  html += chipRow('担当', withAlways(Object.keys(staffSet)).sort(function(a, b) {
       const ia = STAFF_ORDER.indexOf(a), ib = STAFF_ORDER.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b, 'ja');
     }).map(function(x) { return { v: x, t: x }; }), selStaffs, 'staff');
@@ -4215,7 +4231,7 @@ async function renderData(params) {
   const hasShift = {}, shiftDays = {};
   (shiftQ || []).forEach(function(sh) {
     if (sh.kind !== 'work') return;
-    if (RETIRED_STAFF.indexOf(sh.staff_name) >= 0) return;
+    if (isRetired(sh.staff_name)) return;
     if (!hit(selStaffs, sh.staff_name)) return;
     const wd = dowOfYmd(sh.date);
     if (!hit(selDows, wd)) return;
@@ -4289,7 +4305,7 @@ async function renderData(params) {
     const byStaff = {}, offShift = {};
     rows.forEach(function(r) {
       const st = (r.staff_names && r.staff_names[0]) || '担当なし';
-      if (RETIRED_STAFF.indexOf(st) >= 0) return;
+      if (isRetired(st)) return;
       if (!hit(selStores, r.store_tag || '')) return;
       const d = new Date(r.booking_start);
       const ymd = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(d);
@@ -4518,7 +4534,7 @@ async function renderData(params) {
     const roster = {};
     (rosterQ || []).forEach(function(sh) {
       if (sh.kind !== 'work') return;
-      if (RETIRED_STAFF.indexOf(sh.staff_name) >= 0) return;
+      if (isRetired(sh.staff_name)) return;
       if (planStore && (SHIFT_STORE_FULL[sh.store] || sh.store) !== planStore) return;
       roster[sh.staff_name] = true;
     });
