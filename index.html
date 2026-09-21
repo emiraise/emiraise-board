@@ -2512,7 +2512,7 @@ async function renderStats(params) {
       .eq('status', 'accepted')
       .or('menu.ilike.%初回%,menu.ilike.%体験%,menu.ilike.%キャンペーン%,menu.ilike.%かんざし%,customer_name.ilike.%新規%')
       .limit(1000),
-    sb.from('crm_reservations').select('store_tag,booking_start,status,customer_name,menu')
+    sb.from('crm_reservations').select('store_tag,booking_start,status,customer_name,menu,merchant_id,customer_id')
       .gte('booking_start', first + 'T00:00:00+09:00').lt('booking_start', nextFirst + 'T00:00:00+09:00')
       .neq('status', 'accepted').limit(1000),
     fetchTable('v_trial_outcomes', 'name_key,won', ['name_key']),
@@ -2520,13 +2520,9 @@ async function renderStats(params) {
   if (res.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(res.error.message) + '</div>'; return; }
   // 店舗別のキャンセル数（実施レッスンとの整合性表示用）
   const cxByStore = {};
-  let cxTrial = 0;   // そのうち体験のキャンセル（体験数には入れず、別に出す）
-  ((cxQ && cxQ.data) || []).forEach(function(r) {
-    if (INTERNAL_NAME_RE.test(r.customer_name || '')) return;
-    const st = r.store_tag || '店舗不明';
-    cxByStore[st] = (cxByStore[st] || 0) + 1;
-    if (/初回|体験|キャンペーン|かんざし/.test(r.menu || '') || /新規|体験/.test(r.customer_name || '')) cxTrial++;
-  });
+  let cxTrial = 0;              // 体験のキャンセル件数（体験数には入れず、別に出す）
+  const cxTrialWho = {};        // 同じ方の重複を見るため、人単位でも数える
+  const cxRows = (cxQ && cxQ.data) || [];
   // 成約の判定は体験タブと同じ台帳（v_trial_outcomes）を使う。
   // ①次の予約 ②契約 ③会員メニューの予約 ④測定シート ⑤ボードでの手入力、が全部効く
   const wonBy = {};
@@ -2540,6 +2536,17 @@ async function renderStats(params) {
     return personOfS[custKey(r.merchant_id, r.customer_id)] || nameKey(r.customer_name);
   }
   function isWonR(r) { return !!wonBy[personKeyS(r)]; }
+  cxRows.forEach(function(r) {
+    if (INTERNAL_NAME_RE.test(r.customer_name || '')) return;
+    const st = r.store_tag || '店舗不明';
+    cxByStore[st] = (cxByStore[st] || 0) + 1;
+    if (/初回|体験|キャンペーン|かんざし/.test(r.menu || '') || /新規|体験/.test(r.customer_name || '')) {
+      cxTrial++;
+      const k = personKeyS(r);
+      if (k) cxTrialWho[k] = (cxTrialWho[k] || 0) + 1;
+    }
+  });
+  const cxTrialPeople = Object.keys(cxTrialWho).length;
   const monthShifts = shiftQ.data || [];
   const trials120 = trialQ.data || [];
 
@@ -2785,8 +2792,12 @@ async function renderStats(params) {
     + '<div style="font-weight:800;margin-bottom:6px">🚀 マーケティング（責任者：大地）</div>'
     + '<div style="font-size:13px;margin:3px 0">体験数 <b style="font-size:18px">' + trialCount + '</b> / 目標' + trialTotalTgt + '名</div>'
     + '<div style="font-size:11px;color:var(--sub);margin:-2px 0 3px">内訳: 来店済み <b>' + trialDone + '</b> ・ これからのご予約 <b>' + (trialCount - trialDone) + '</b>'
-    + '（キャンセル <b style="color:#b3261e">' + cxTrial + '</b>件は体験数に含みません'
-    + (trialCount + cxTrial ? '＝予約' + (trialCount + cxTrial) + '件中' + Math.round(cxTrial * 100 / (trialCount + cxTrial)) + '%' : '') + '）</div>'
+    + '（体験数はキャンセルを含みません）</div>'
+    + '<div style="font-size:11px;color:var(--sub);margin:-2px 0 3px">キャンセル <b style="color:#b3261e">' + cxTrial + '</b>件'
+    + (cxTrialPeople ? ' ＝ <b>' + cxTrialPeople + '名</b>'
+        + (cxTrial > cxTrialPeople ? '<span style="color:#b3261e">（同じ方の重複 ' + (cxTrial - cxTrialPeople) + '件）</span>' : '')
+        + '・人数でみると ' + Math.round(cxTrialPeople * 100 / (trialCount + cxTrialPeople)) + '%' : '')
+    + '</div>'
     + gbar(trialCount * 100 / trialTotalTgt, '#b0743a');
   Object.keys(TRIAL_TGT).forEach(function(st) {
     const a = trialByStore[st] || 0;
