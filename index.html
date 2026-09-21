@@ -3494,8 +3494,9 @@ async function renderTrial() {
   function chipT(key, val, label, style, title) {
     const on = hQuery.get(key) === val;
     return '<a href="' + linkT(key, val) + '"' + (on ? ' class="on"' : '')
-      + (style ? ' style="' + style + '"' : '')
-      + (title ? ' title="' + esc(title) + '"' : '') + '>' + label + '</a>';
+      + (on ? '' : (style ? ' style="' + style + '"' : ''))
+      + ' title="' + esc(on ? 'もう一度押すと解除します' : (title || '押すと絞り込みます')) + '">'
+      + (on ? '✓ ' : '') + label + '</a>';
   }
   function isPortal(r) { return (r.menu || '').indexOf('かんざし') >= 0; }
   function srcOf(r) { return leadSourceOf(r, custBy, manualSrc, isPortal(r), srcByName, personKey); }
@@ -3871,6 +3872,21 @@ async function renderTrial() {
   if (selWhen) subset = subset.filter(inWhen);
   if (selRes)  subset = subset.filter(inRes);
   html += kanzashiHtml(byStore);
+  const WHEN_LABEL = { fut: 'これからの体験', cur: '今月', next: '翌月', last: '先月',
+                       week: '今週', kanzashi: 'かんざし（今月）' };
+  const RES_LABEL  = { won: '成約', lost: '未成約', cx: 'キャンセル', resched: '振替' };
+  if (selWhen || selRes || selSrc) {
+    const names = [];
+    if (selWhen) names.push(WHEN_LABEL[selWhen] || selWhen);
+    if (selRes)  names.push(RES_LABEL[selRes] || selRes);
+    if (selSrc)  names.push(selSrc);
+    const clearBase = '#/trial' + (selStore ? '/' + encodeURIComponent(selStore) : '');
+    html += '<div class="mhead" style="background:#eef3f1;display:flex;align-items:center;gap:10px">'
+      + '<b>🔎 絞り込み中: ' + esc(names.join(' × ')) + '</b>'
+      + '<span style="color:var(--sub);font-size:12px">／ ' + subset.length + '件を表示しています</span>'
+      + '<a href="' + clearBase + '" style="margin-left:auto;font-size:12px;color:var(--accent)">✕ 絞り込みを解除</a>'
+      + '</div>';
+  }
   html += listHtml(subset, !selStore);
   html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
   if (syncAgoH !== null && syncAgoH > 26) {
