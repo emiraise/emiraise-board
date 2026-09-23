@@ -60,6 +60,48 @@
     .trow { grid-template-columns:88px 46px 1fr auto; row-gap:4px; }
     .trow > .tstaff { grid-column:1 / -1; color:var(--sub); }
   }
+  /* ── スマートフォン（2026-09-23） ──
+     横に長い表とヘッダーがページごと横にずれていた。
+     はみ出すものは「その中だけ」スクロールさせ、ページ自体は縦だけに保つ */
+  @media (max-width:640px) {
+    html, body { overflow-x:hidden; }
+    header { padding:8px 10px; gap:6px; overflow-x:auto; overflow-y:hidden;
+             flex-wrap:nowrap; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+    header::-webkit-scrollbar { display:none; }
+    header > * { flex:0 0 auto; }
+    header .brand, header a.brand { margin-right:4px; }
+    .brandimg { height:34px; margin:-4px 0; }
+    header a, header button { padding:7px 10px; font-size:12.5px; }
+    main#app { padding:10px 10px 40px; }
+    h2 { font-size:17px; }
+    h3 { font-size:14px; }
+    /* 指で押しやすい大きさに */
+    .chips { gap:5px; }
+    .chips a, .chips .chip { padding:7px 11px; font-size:12.5px; }
+    .tabs a { padding:8px 13px; font-size:13px; }
+    /* 体験・予約の1行を折り返して、日付とお名前を先に読めるようにする */
+    .trow { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; padding:10px 2px; }
+    .trow > * { flex:0 0 auto; }
+    .trow > a[href^="#/c/"] { flex:1 1 7em; font-size:14px; }
+    .trow > .tstamp, .tstamp { font-size:11px; }
+    .trow .d { min-width:74px; }
+    /* 表は中だけ横スクロール。1列目は固定したまま */
+    .tlwrap { -webkit-overflow-scrolling:touch; }
+    .rep { font-size:12px; }
+    .rep th, .rep td { padding:7px 5px; }
+    /* シフト案の週カレンダーは7列のままだと潰れるので、中で横スクロールさせる */
+    .wkcal { min-width:620px; }
+    .mhead { font-size:12.5px; padding:7px 9px; }
+    /* 経路・成約のプルダウンが15pxしかなく、指では押せなかった */
+    .lsrc, .lout { font-size:12px; padding:5px 6px; min-height:32px; max-width:9.5em; }
+    .lout { max-width:6.5em; margin-left:0; }
+    /* 小さすぎるラベルと、押す面積が足りないリンクを広げる */
+    /* 各所で style="font-size:10px" を直接書いているため、
+       スマートフォンでは !important でないと上書きできない */
+    .badge { font-size:11px !important; padding:3px 7px; }
+    .trow a, .plopen { display:inline-block; padding:3px 0; }
+    .pill { font-size:11.5px; }
+  }
   /* 予約が入った日時・キャンセル日時（予約タブの右端） */
   .stamp { display:inline-flex; flex-direction:column; align-items:flex-end; gap:1px;
            margin-left:8px; font-size:10px; line-height:1.3; white-space:nowrap; }
@@ -3033,7 +3075,7 @@ async function renderStats(params) {
       const margin = sales ? Math.round(profit * 1000 / sales) / 10 : 0;
       html += '<div class="plcard" data-st="' + esc(st) + '" style="display:none;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:6px 0">'
         + '<div style="font-weight:800;margin-bottom:4px"><span class="badge" style="background:' + storeColor(st) + '">' + esc(st) + '</span> ' + mo + '月の店舗損益（概算）</div>'
-        + '<table class="rep" style="width:auto"><tbody>'
+        + '<div class="tlwrap" style="padding:0"><table class="rep" style="width:auto"><tbody>'
         + '<tr><td style="text-align:left">売上（' + o.lessons + 'レッスン×実効単価8,740円）</td><td>' + sales + '万円</td></tr>'
         + '<tr><td style="text-align:left">人件費（レッスン比率で配賦）</td><td>−' + pay + '万円</td></tr>'
         + '<tr><td style="text-align:left">家賃</td><td>−' + cost.rent + '万円</td></tr>'
@@ -4745,7 +4787,7 @@ async function renderData(params) {
       const lead = (firstDow + 6) % 7;          // 月曜まで何日戻すか
       const cells = lead + dim;
       const weeks = Math.ceil(cells / 7);
-      let calHtml = '<div class="wkcal">';
+      let calHtml = '<div class="tlwrap" style="padding:0;background:none;border:none"><div class="wkcal">';
       DOW_ORDER.forEach(function(w) {
         calHtml += '<div class="wkhd' + (w === 6 ? ' sat' : w === 0 ? ' sun' : '') + '">'
           + DOW_LABEL[w] + '</div>';
@@ -4777,7 +4819,7 @@ async function renderData(params) {
           + (gap >= -0.05 ? '✓ 足りる' : '不足 ' + Math.abs(gap).toFixed(1)) + '</span></div>';
         calHtml += '</div>';
       }
-      calHtml += '</div>';
+      calHtml += '</div></div>';   // .wkcal と、横スクロール用の外箱
       const rate = totDem ? Math.round(totCov * 100 / totDem) : 0;
       planHtml += '<div class="chips" style="margin-top:4px">'
         + '<a style="pointer-events:none;background:' + (rate >= 95 ? '#2e7d55' : rate >= 85 ? '#c07a2a' : '#b3261e')
