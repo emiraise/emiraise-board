@@ -5249,90 +5249,6 @@ async function renderStore(storeName, params) {
     + '<a class="navbtn" href="#/store/' + encodeURIComponent(storeName) + '?ym=' + nextYm + '">' + parseInt(nextYm.slice(5, 7), 10) + '月 →</a>'
     + (ym !== todayS.slice(0, 7) ? '<a class="navbtn" href="#/store/' + encodeURIComponent(storeName) + '">今月</a>' : '')
     + '</div>';
-  // ── 本日のタイムライン（この店舗を開いて最初に見るもの）──
-  // ミーティング・研修・内部ブロックも時間を埋めているので、本日の枠では除かない
-  const todayRows = ((trialQ && trialQ.data) || []).filter(function(r) {
-    return (r.store_tag || '') === storeName
-      && new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start)) === todayS;
-  }).sort(function(a, b) { return (a.booking_start || '').localeCompare(b.booking_start || ''); });
-  const todayOk = todayRows.filter(function(r) { return r.status === 'accepted'; });
-  const todayGuest = todayOk.filter(function(r) {
-    return !INTERNAL_NAME_RE.test(r.customer_name || '') && !INTERNAL_NAME_RE.test(r.menu || '');
-  });
-  const todayInner = todayOk.length - todayGuest.length;
-  html += '<div class="card"><h3>📅 本日のタイムライン（' + todayS.slice(5).replace('-', '/') + '・レッスン '
-    + todayGuest.length + '件'
-    + (todayInner ? '／内部予定 ' + todayInner + '件' : '')
-    + (todayRows.length - todayOk.length ? '／キャンセル ' + (todayRows.length - todayOk.length) + '件' : '') + '）</h3>';
-  if (!todayRows.length) {
-    html += '<div class="empty">本日のご予約はありません</div>';
-  } else {
-    const byStaffToday = {};
-    todayGuest.forEach(function(r) {
-      resStaffs(r).forEach(function(sn) { if (!isRetired(sn)) byStaffToday[sn] = (byStaffToday[sn] || 0) + 1; });
-    });
-    const sNames = staffOfStore(storeName, sortStaffs(Object.keys(byStaffToday)));
-    if (sNames.length) {
-      html += '<div class="chips">' + sNames.map(function(sn) {
-        return '<span class="chip">' + esc(sn) + ' <b>' + byStaffToday[sn] + '</b>件</span>';
-      }).join('') + '</div>';
-    }
-  }
-  // 時間軸（担当ごとの行）。シフトの網かけも出して、空いている時間が見えるようにする
-  const dayShifts = (shiftQ || []).filter(function(x) {
-    if (x.date !== todayS) return false;
-    const st = x.store || '';
-    if (!st) return true;                                  // 店舗の記載が無い行はどの店か分からないので残す
-    return (SHIFT_STORE_FULL[st] || st) === storeName;
-  });
-  const tlSet = {};
-  todayOk.forEach(function(r) {
-    resStaffs(r).forEach(function(sn) { if (!isRetired(sn)) tlSet[nw(sn)] = sn; });
-  });
-  dayShifts.forEach(function(x) {
-    if (x.staff_name && !isRetired(x.staff_name)) tlSet[nw(x.staff_name)] = x.staff_name;
-  });
-  const tlStaff = staffOfStore(storeName, sortStaffs(withAlways(
-    Object.keys(tlSet).map(function(k) { return tlSet[k]; })
-  )));
-  if (tlStaff.length) {
-    const dayBlocks = (blkQ || []).filter(function(b) { return b.date === todayS; });
-    const dayCal = (calQ || []).filter(function(e) { return e.date === todayS; });
-    const dayAvail = (availQ || []).filter(function(a) { return a.date === todayS; });
-    const dayStBlk = (stBlkQ || []).filter(function(b) { return b.date === todayS; });
-    html += '<div class="tlwrap" style="margin-top:8px"><div class="tl">' + tlHeadHtml();
-    tlStaff.forEach(function(sn) {
-      const sh = shiftFor(dayShifts, sn, todayS);
-      html += '<div class="tlrow"><div class="tlname">' + esc(sn) + shiftTagHtml(sh, codesQ)
-        + calAllDayChips(calFor(dayCal, sn, todayS)) + '</div>'
-        + '<div class="tltrack">' + shiftShadeHtml(sh, codesQ)
-        + storesBlocksHtml(sbFor(dayStBlk, sn, todayS))
-        + availBlocksHtml(availFor(dayAvail, sn, todayS, storeName))
-        + tbBlocksHtml(blocksFor(dayBlocks, sn, todayS))
-        + calBlocksHtml(calFor(dayCal, sn, todayS))
-        + tlBlocksHtml(byStaff(todayOk, sn), null, null) + '</div></div>';
-    });
-    html += '</div></div>';
-    html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">'
-      + '斜線＝シフト外・休み・会議｜グレー＝休憩などの固定ブロック｜🚫＝STORESのブロック（理由つき）｜'
-      + '<span style="color:#1f6f54;font-weight:700">緑点線「空」＝いまお客様が予約できる枠</span>｜'
-      + 'ミーティング・研修もお客様の予約と同じように枠として出します。'
-      + '<a href="#/tl?store=' + encodeURIComponent(storeName) + '">タイムラインタブ</a>でも同じものが見られます</div>';
-  }
-  const todayCx = todayRows.filter(function(r) { return r.status !== 'accepted'; });
-  if (todayCx.length) {
-    html += '<div style="margin-top:6px">' + todayCx.map(function(r) {
-      return '<div class="trow" style="opacity:.7">'
-        + '<span class="d">' + fmtTime(r.booking_start) + '</span>'
-        + '<a style="color:var(--accent);text-decoration:none" href="#/c/'
-        + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
-        + '<span class="tstaff" style="color:var(--sub)">' + esc(resStaffs(r).join('・')) + '</span>'
-        + '<span class="pill" style="background:#f0dede;color:#8a2b22">キャンセル</span></div>';
-    }).join('') + '</div>';
-  }
-  html += '</div>';
-
-
   function kpi(label, value, sub, color) {
     return '<div style="border:1px solid var(--line);border-radius:12px;padding:9px 11px;background:#fff">'
       + '<div style="color:var(--sub);font-size:11.5px">' + label + '</div>'
@@ -5448,6 +5364,90 @@ async function renderStore(storeName, params) {
     });
   }
   html += '</div>';
+
+  // ── 本日のタイムライン（今週のトピックの次に見るもの）──
+  // ミーティング・研修・内部ブロックも時間を埋めているので、本日の枠では除かない
+  const todayRows = ((trialQ && trialQ.data) || []).filter(function(r) {
+    return (r.store_tag || '') === storeName
+      && new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start)) === todayS;
+  }).sort(function(a, b) { return (a.booking_start || '').localeCompare(b.booking_start || ''); });
+  const todayOk = todayRows.filter(function(r) { return r.status === 'accepted'; });
+  const todayGuest = todayOk.filter(function(r) {
+    return !INTERNAL_NAME_RE.test(r.customer_name || '') && !INTERNAL_NAME_RE.test(r.menu || '');
+  });
+  const todayInner = todayOk.length - todayGuest.length;
+  html += '<div class="card"><h3>📅 本日のタイムライン（' + todayS.slice(5).replace('-', '/') + '・レッスン '
+    + todayGuest.length + '件'
+    + (todayInner ? '／内部予定 ' + todayInner + '件' : '')
+    + (todayRows.length - todayOk.length ? '／キャンセル ' + (todayRows.length - todayOk.length) + '件' : '') + '）</h3>';
+  if (!todayRows.length) {
+    html += '<div class="empty">本日のご予約はありません</div>';
+  } else {
+    const byStaffToday = {};
+    todayGuest.forEach(function(r) {
+      resStaffs(r).forEach(function(sn) { if (!isRetired(sn)) byStaffToday[sn] = (byStaffToday[sn] || 0) + 1; });
+    });
+    const sNames = staffOfStore(storeName, sortStaffs(Object.keys(byStaffToday)));
+    if (sNames.length) {
+      html += '<div class="chips">' + sNames.map(function(sn) {
+        return '<span class="chip">' + esc(sn) + ' <b>' + byStaffToday[sn] + '</b>件</span>';
+      }).join('') + '</div>';
+    }
+  }
+  // 時間軸（担当ごとの行）。シフトの網かけも出して、空いている時間が見えるようにする
+  const dayShifts = (shiftQ || []).filter(function(x) {
+    if (x.date !== todayS) return false;
+    const st = x.store || '';
+    if (!st) return true;                                  // 店舗の記載が無い行はどの店か分からないので残す
+    return (SHIFT_STORE_FULL[st] || st) === storeName;
+  });
+  const tlSet = {};
+  todayOk.forEach(function(r) {
+    resStaffs(r).forEach(function(sn) { if (!isRetired(sn)) tlSet[nw(sn)] = sn; });
+  });
+  dayShifts.forEach(function(x) {
+    if (x.staff_name && !isRetired(x.staff_name)) tlSet[nw(x.staff_name)] = x.staff_name;
+  });
+  const tlStaff = staffOfStore(storeName, sortStaffs(withAlways(
+    Object.keys(tlSet).map(function(k) { return tlSet[k]; })
+  )));
+  if (tlStaff.length) {
+    const dayBlocks = (blkQ || []).filter(function(b) { return b.date === todayS; });
+    const dayCal = (calQ || []).filter(function(e) { return e.date === todayS; });
+    const dayAvail = (availQ || []).filter(function(a) { return a.date === todayS; });
+    const dayStBlk = (stBlkQ || []).filter(function(b) { return b.date === todayS; });
+    html += '<div class="tlwrap" style="margin-top:8px"><div class="tl">' + tlHeadHtml();
+    tlStaff.forEach(function(sn) {
+      const sh = shiftFor(dayShifts, sn, todayS);
+      html += '<div class="tlrow"><div class="tlname">' + esc(sn) + shiftTagHtml(sh, codesQ)
+        + calAllDayChips(calFor(dayCal, sn, todayS)) + '</div>'
+        + '<div class="tltrack">' + shiftShadeHtml(sh, codesQ)
+        + storesBlocksHtml(sbFor(dayStBlk, sn, todayS))
+        + availBlocksHtml(availFor(dayAvail, sn, todayS, storeName))
+        + tbBlocksHtml(blocksFor(dayBlocks, sn, todayS))
+        + calBlocksHtml(calFor(dayCal, sn, todayS))
+        + tlBlocksHtml(byStaff(todayOk, sn), null, null) + '</div></div>';
+    });
+    html += '</div></div>';
+    html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">'
+      + '斜線＝シフト外・休み・会議｜グレー＝休憩などの固定ブロック｜🚫＝STORESのブロック（理由つき）｜'
+      + '<span style="color:#1f6f54;font-weight:700">緑点線「空」＝いまお客様が予約できる枠</span>｜'
+      + 'ミーティング・研修もお客様の予約と同じように枠として出します。'
+      + '<a href="#/tl?store=' + encodeURIComponent(storeName) + '">タイムラインタブ</a>でも同じものが見られます</div>';
+  }
+  const todayCx = todayRows.filter(function(r) { return r.status !== 'accepted'; });
+  if (todayCx.length) {
+    html += '<div style="margin-top:6px">' + todayCx.map(function(r) {
+      return '<div class="trow" style="opacity:.7">'
+        + '<span class="d">' + fmtTime(r.booking_start) + '</span>'
+        + '<a style="color:var(--accent);text-decoration:none" href="#/c/'
+        + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
+        + '<span class="tstaff" style="color:var(--sub)">' + esc(resStaffs(r).join('・')) + '</span>'
+        + '<span class="pill" style="background:#f0dede;color:#8a2b22">キャンセル</span></div>';
+    }).join('') + '</div>';
+  }
+  html += '</div>';
+
 
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px;margin:8px 0 12px">'
     + kpi('レッスン数', lessons, cxAll ? 'キャンセル ' + cxAll + '件' : 'キャンセル なし')
