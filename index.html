@@ -5694,6 +5694,38 @@ async function render() {
 }
 window.addEventListener('hashchange', render);
 render();
+
+// ── 新しい版が出たら知らせる ──
+// GitHub Pages とブラウザのキャッシュで、直したはずの画面が古いまま見えることが
+// 何度かあったため（2026-09-25）。配信ファイルの ETag を見て、変わっていたら知らせる
+(function watchVersion() {
+  let myTag = null;
+  async function tagNow() {
+    try {
+      const r = await fetch(location.pathname + '?v=' + Date.now(), { method: 'HEAD', cache: 'no-store' });
+      return r.headers.get('etag') || r.headers.get('last-modified');
+    } catch (e) { return null; }
+  }
+  function showBanner() {
+    if (document.getElementById('newver')) return;
+    const d = document.createElement('div');
+    d.id = 'newver';
+    d.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:50;'
+      + 'background:#1f2d2a;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;'
+      + 'box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer';
+    d.textContent = '🔄 新しい版があります — 押すと最新にします';
+    d.addEventListener('click', function() { location.reload(true); });
+    document.body.appendChild(d);
+  }
+  tagNow().then(function(t) {
+    myTag = t;
+    if (!myTag) return;               // 取れない環境では何もしない
+    setInterval(async function() {
+      const t2 = await tagNow();
+      if (t2 && myTag && t2 !== myTag) showBanner();
+    }, 10 * 60 * 1000);
+  });
+})();
 </script>
 </body>
 </html>
