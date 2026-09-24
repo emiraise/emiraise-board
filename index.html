@@ -14,16 +14,22 @@
   * { box-sizing:border-box; }
   body { margin:0; font-family:"Noto Sans JP",-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; }
   header[hidden] { display:none; }
-  header { position:sticky; top:0; z-index:10; background:linear-gradient(120deg, var(--accent-d), var(--accent)); color:#fff; padding:10px 14px; display:flex; align-items:center; gap:8px; box-shadow:0 2px 10px rgba(18,70,58,.25); }
+  header { position:sticky; top:0; z-index:10; background:linear-gradient(120deg, var(--accent-d), var(--accent)); color:#fff; padding:10px 14px; display:flex; align-items:center; gap:8px; box-shadow:0 2px 10px rgba(18,70,58,.25);
+           overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+  header::-webkit-scrollbar { display:none; }
+  header > * { flex:0 0 auto; white-space:nowrap; }
   header .brand { font-weight:700; font-size:15px; margin-right:auto; }
   header button, header a { background:rgba(255,255,255,.15); color:#fff; border:none; border-radius:8px; padding:7px 12px; font-size:13px; text-decoration:none; cursor:pointer; }
   header a.on { background:#fff; color:var(--accent); font-weight:700; }
+  /* 店舗タブ。機能のタブと見分けがつくよう、左端に店舗の色を付ける */
+  header .navsep { width:1px; align-self:stretch; background:rgba(255,255,255,.35); margin:0 2px; flex:0 0 auto; }
+  header a.navstore { border-left:4px solid currentColor; }
   main { max-width:none; margin:0 auto; padding:14px 18px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px; margin-bottom:12px; box-shadow:0 1px 5px rgba(20,45,35,.05); }
   h2 { font-size:16px; margin:6px 2px 10px; }
   h3 { font-size:13px; color:var(--sub); margin:14px 2px 6px; text-transform:none; }
   .daynav { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
-  .daynav button { border:1px solid var(--line); background:#fff; border-radius:10px; padding:8px 12px; font-size:14px; cursor:pointer; }
+  .daynav button, .daynav a.navbtn { border:1px solid var(--line); background:#fff; border-radius:10px; padding:8px 12px; font-size:14px; cursor:pointer; text-decoration:none; color:inherit; }
   .daynav input { border:1px solid var(--line); border-radius:10px; padding:8px; font-size:14px; flex:1; }
   .staff-head { display:flex; align-items:center; gap:8px; margin:16px 2px 6px; font-weight:700; font-size:14px; }
   .staff-head .cnt { color:var(--sub); font-weight:400; font-size:12px; }
@@ -310,7 +316,7 @@
   .rep.zebra tbody tr.grp td,
   .rep.zebra tbody tr.grp td:first-child { background:#c9d6ce; }
   input, select, textarea { background:var(--bg); border:none !important; box-shadow:inset 3px 3px 6px var(--sd), inset -3px -3px 6px var(--sl); border-radius:12px; outline:none; }
-  .daynav button, .selbar button, .tabs a, .chips a, .chips .chip, .tagbtn, .mic, .searchbar .btn { background:var(--bg); border:none; box-shadow:3px 3px 7px var(--sd), -3px -3px 7px var(--sl); }
+  .daynav button, .daynav a.navbtn, .selbar button, .tabs a, .chips a, .chips .chip, .tagbtn, .mic, .searchbar .btn { background:var(--bg); border:none; box-shadow:3px 3px 7px var(--sd), -3px -3px 7px var(--sl); }
   .chips .chip a { box-shadow:none; background:none; }
   .tabs a.on, .chips a.on { background:var(--bg); color:var(--accent); font-weight:800; border:none; box-shadow:inset 3px 3px 6px var(--sd), inset -3px -3px 6px var(--sl); }
   .tagbtn.on { background:var(--accent); color:#fff; box-shadow:inset 3px 3px 6px rgba(12,60,45,.45); }
@@ -339,6 +345,12 @@
   <a href="#/report">日報</a>
   <a href="#/data">データ</a>
   <a href="#/search">検索</a>
+  <span class="navsep"></span>
+  <a class="navstore" href="#/store/%E9%87%91%E6%B2%A2%E6%9C%AC%E5%BA%97">金沢本店</a>
+  <a class="navstore" href="#/store/%E9%87%91%E6%B2%A2%E9%A7%85%E8%A5%BF%E5%BA%97">金沢駅西店</a>
+  <a class="navstore" href="#/store/%E5%AF%8C%E5%B1%B1%E6%9D%B1%E5%BA%97">富山東店</a>
+  <a class="navstore" href="#/store/%E7%A6%8F%E4%BA%95%E9%AB%98%E6%9F%B3%E5%BA%97">福井高柳店</a>
+  <a class="navstore" href="#/store/%E5%A4%A9%E7%8E%8B%E5%AF%BA%E5%BA%97">天王寺店</a>
   <button id="pwBtn" title="パスワード変更">🔑</button>
   <button id="logoutBtn">ログアウト</button>
 </header>
@@ -4983,6 +4995,264 @@ async function renderFinance(params) {
 }
 
 // ── ルーター ──────────────────────────────
+// ── 店舗ページ（店舗ごとに必要な数字を1画面にまとめる・2026-09-24 大地さん要望）──
+async function renderStore(storeName, params) {
+  const _seq = newRender();
+  app.innerHTML = '<div class="empty">読み込み中…</div>';
+  const todayS = jstToday();
+  const ym = (params.get('ym') || todayS.slice(0, 7));
+  const first = ym + '-01';
+  const nextFirst = addDays(ym + '-28', 7).slice(0, 8) + '01';
+  const prevYm = addDays(first, -1).slice(0, 7);
+  const nextYm = nextFirst.slice(0, 7);
+  const nowIso = new Date().toISOString();
+  const y = parseInt(ym.slice(0, 4), 10), mo = parseInt(ym.slice(5, 7), 10);
+
+  const [monQ, custQ, trialQ, outQ, nameQ, futQ] = await Promise.all([
+    fetchRange(first, nextFirst),
+    fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,name,subscriptions,ticket_books'),
+    sb.from('crm_reservations').select('*')
+      .gte('booking_start', addDays(todayS, -90) + 'T00:00:00+09:00')
+      .lt('booking_start', addDays(todayS, 92) + 'T00:00:00+09:00')
+      .eq('store_tag', storeName).limit(1000),
+    fetchTable('v_trial_outcomes', 'name_key,trial_date,next_date,contract_date,member_date,'
+               + 'sheet_won,sheet_lost,had_visit,had_cancel,won,manual_outcome', ['name_key']),
+    fetchTable('crm_lead_source_names', 'name_key,store,source,origin', ['name_key', 'store']),
+    fetchRange(todayS, addDays(todayS, 92)),
+  ]);
+  if (monQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(monQ.error.message) + '</div>'; return; }
+  if (stale(_seq)) return;
+
+  const custs = (custQ && custQ.data) || [];
+  const nameOf = {}, storeOfCust = {};
+  custs.forEach(function(c) {
+    nameOf[custKey(c.merchant_id, c.customer_id)] = nameKey(c.name);
+    storeOfCust[custKey(c.merchant_id, c.customer_id)] = ((c.merchant_name || '').split(/[\s　]/).pop()) || '';
+  });
+  function pkey(r) { return nameOf[custKey(r.merchant_id, r.customer_id)] || nameKey(r.customer_name); }
+
+  const outcome = {};
+  ((outQ && outQ.data) || []).forEach(function(x) { outcome[x.name_key] = x; });
+  const srcByName = {};
+  ((nameQ && nameQ.data) || []).forEach(function(x) {
+    srcByName[x.name_key + '|' + (x.store || '')] = x.source;
+    if (!srcByName[x.name_key]) srcByName[x.name_key] = x.source;
+  });
+
+  const rows = ((monQ && monQ.data) || []).filter(function(r) { return (r.store_tag || '') === storeName; });
+  const all = ((trialQ && trialQ.data) || []).filter(function(r) {
+    return !INTERNAL_NAME_RE.test(r.customer_name || '') && !INTERNAL_NAME_RE.test(r.menu || '');
+  });
+  function isTrial(r) {
+    return /初回|体験|キャンペーン|かんざし/.test(r.menu || '') || /新規|体験/.test(r.customer_name || '');
+  }
+  function isWon(k) {
+    const o = outcome[k];
+    if (!o) return false;
+    if (o.manual_outcome) return o.manual_outcome === 'won';
+    return !!(o.won || o.next_date || o.contract_date || o.member_date || o.sheet_won);
+  }
+
+  // ── 今月の数字 ──
+  const lessons = rows.filter(function(r) { return r.status === 'accepted'; }).length;
+  const cxAll = rows.length - lessons;
+  const monTrials = rows.filter(function(r) { return isTrial(r) && r.status === 'accepted'; });
+  const monTrialCx = rows.filter(function(r) { return isTrial(r) && r.status !== 'accepted'; });
+  const visited = monTrials.filter(function(r) { return r.booking_start < nowIso; });
+  const comingTrials = monTrials.filter(function(r) { return r.booking_start >= nowIso; });
+  const wonCnt = visited.filter(function(r) { return isWon(pkey(r)); }).length;
+  const cvr = visited.length ? Math.round(wonCnt * 100 / visited.length) : null;
+
+  let members = 0, susp = 0, quit = 0;
+  custs.forEach(function(c) {
+    if (storeOfCust[custKey(c.merchant_id, c.customer_id)] !== storeName) return;
+    let act = false, sp = false, q = false;
+    (c.subscriptions || []).forEach(function(sub) {
+      const end = (sub.contract_end_at || '').slice(0, 10);
+      if (end && end >= first && end < nextFirst) q = true;
+      if (sub.contract_status === 'active' && !end) act = true;
+      if (sub.contract_status === 'suspended') sp = true;
+    });
+    if (act) members++; else if (sp) susp++;
+    if (q) quit++;
+  });
+
+  const col = storeColor(storeName);
+  let html = '<h2><span class="badge" style="background:' + col + ';font-size:15px;padding:4px 12px">'
+    + esc(storeName) + '</span> <small style="color:var(--sub);font-weight:400;font-size:13px">' + y + '年' + mo + '月</small></h2>';
+  html += '<div class="daynav">'
+    + '<a class="navbtn" href="#/store/' + encodeURIComponent(storeName) + '?ym=' + prevYm + '">← ' + parseInt(prevYm.slice(5, 7), 10) + '月</a>'
+    + '<b style="font-size:15px">' + y + '年' + mo + '月</b>'
+    + '<a class="navbtn" href="#/store/' + encodeURIComponent(storeName) + '?ym=' + nextYm + '">' + parseInt(nextYm.slice(5, 7), 10) + '月 →</a>'
+    + (ym !== todayS.slice(0, 7) ? '<a class="navbtn" href="#/store/' + encodeURIComponent(storeName) + '">今月</a>' : '')
+    + '</div>';
+
+  function kpi(label, value, sub, color) {
+    return '<div style="border:1px solid var(--line);border-radius:12px;padding:9px 11px;background:#fff">'
+      + '<div style="color:var(--sub);font-size:11.5px">' + label + '</div>'
+      + '<div style="font-size:21px;font-weight:800;color:' + (color || 'inherit') + '">' + value + '</div>'
+      + (sub ? '<div style="color:var(--sub);font-size:11px">' + sub + '</div>' : '') + '</div>';
+  }
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px;margin:8px 0 12px">'
+    + kpi('レッスン数', lessons, cxAll ? 'キャンセル ' + cxAll + '件' : 'キャンセル なし')
+    + kpi('会員数', members + '名', susp ? '休会 ' + susp + '名' : '休会 なし')
+    + kpi('今月の退会', quit + '名', '', quit ? '#b3261e' : '')
+    + kpi('体験', monTrials.length + '名', '来店' + visited.length + '・これから' + comingTrials.length)
+    + kpi('成約', wonCnt + '名', cvr === null ? '来店がまだありません' : '来店' + visited.length + '名の' + cvr + '%', '#0c7a3e')
+    + kpi('体験キャンセル', monTrialCx.length + '件', '', monTrialCx.length ? '#b3261e' : '')
+    + '</div>';
+
+  // ── 流入経路（この店舗の体験・直近90日） ──
+  const recent = all.filter(function(r) { return isTrial(r); });
+  const srcTally = {};
+  recent.forEach(function(r) {
+    let sc = srcByName[pkey(r) + '|' + storeName] || srcByName[pkey(r)] || '';
+    if (!sc && /かんざしから自動生成/.test(r.menu || '')) sc = 'かんざし';
+    srcTally[sc || '未設定'] = (srcTally[sc || '未設定'] || 0) + 1;
+  });
+  const srcKeys = LEAD_SOURCES.concat(['未設定']).filter(function(k) { return srcTally[k]; });
+  if (srcKeys.length) {
+    html += '<h3 style="margin:10px 2px 4px">🚪 どこから来たか（直近90日の体験 ' + recent.length + '件）</h3><div class="chips">';
+    srcKeys.forEach(function(k) {
+      html += '<a href="#/trial/' + encodeURIComponent(storeName) + '/' + encodeURIComponent(k) + '"'
+        + ' style="border-left:4px solid ' + (LEAD_STYLE[k] || LEAD_STYLE['未設定']) + '">'
+        + esc(k) + ' <b>' + srcTally[k] + '</b></a>';
+    });
+    html += '</div>';
+  }
+
+  // ── スタッフ別 ──
+  const perStaff = {};
+  rows.forEach(function(r) {
+    if (r.status !== 'accepted') return;
+    resStaffs(r).forEach(function(sn) {
+      if (isRetired(sn)) return;
+      const o = (perStaff[sn] = perStaff[sn] || { total: 0, done: 0, trial: 0 });
+      o.total++;
+      if (r.booking_start < nowIso) o.done++;
+      if (isTrial(r)) o.trial++;
+    });
+  });
+  const staffNames = sortStaffs(Object.keys(perStaff));
+  if (staffNames.length) {
+    html += '<h3 style="margin:12px 2px 4px">👤 スタッフ別（' + mo + '月）</h3>';
+    html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
+      + '<th>スタッフ</th><th>レッスン</th><th>済 / 予定</th><th>体験</th></tr></thead><tbody>';
+    staffNames.forEach(function(sn) {
+      const o = perStaff[sn];
+      html += '<tr><td>' + esc(sn) + '</td><td style="font-weight:700">' + o.total + '</td>'
+        + '<td>' + o.done + ' / ' + (o.total - o.done) + '</td>'
+        + '<td>' + (o.trial || '<span style="color:#bbb">0</span>') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // ── 曜日 × 時間帯（直近90日の実績）──
+  const grid = {}, dowTot = {}, bandTot = {};
+  all.forEach(function(r) {
+    if (r.status !== 'accepted') return;
+    const d = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start));
+    if (d > todayS) return;
+    const hh = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hour12: false })
+      .format(new Date(r.booking_start)), 10);
+    const band = BANDS.filter(function(b) { return hh >= b.from && hh < b.to; })[0];
+    if (!band) return;
+    const w = dowOfYmd(d);
+    grid[w + '|' + band.key] = (grid[w + '|' + band.key] || 0) + 1;
+    dowTot[w] = (dowTot[w] || 0) + 1;
+    bandTot[band.key] = (bandTot[band.key] || 0) + 1;
+  });
+  const gMax = Object.keys(grid).reduce(function(a, k) { return Math.max(a, grid[k]); }, 0);
+  if (gMax) {
+    html += '<h3 style="margin:12px 2px 4px">📊 予約が入る曜日と時間帯（直近90日の実績）</h3>';
+    html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr><th>曜日</th>';
+    BANDS.forEach(function(b) { html += '<th>' + b.label + '<br><small>' + b.range + '</small></th>'; });
+    html += '<th>合計</th></tr></thead><tbody>';
+    [1, 2, 3, 4, 5, 6, 0].forEach(function(w) {
+      html += '<tr><td>' + DOW_LABEL[w] + '曜</td>';
+      BANDS.forEach(function(b) {
+        const v = grid[w + '|' + b.key] || 0;
+        const a = gMax ? v / gMax : 0;
+        html += '<td style="background:rgba(46,125,85,' + (a * 0.72).toFixed(2) + ')'
+          + (a > 0.55 ? ';color:#fff;font-weight:700' : '') + '">' + (v || '') + '</td>';
+      });
+      html += '<td style="font-weight:700">' + (dowTot[w] || 0) + '</td></tr>';
+    });
+    html += '<tr style="font-weight:800;background:#eef3f1"><td>合計</td>';
+    BANDS.forEach(function(b) { html += '<td>' + (bandTot[b.key] || 0) + '</td>'; });
+    html += '<td>' + Object.keys(dowTot).reduce(function(a, k) { return a + dowTot[k]; }, 0) + '</td></tr>';
+    html += '</tbody></table></div>';
+    html += '<div style="color:var(--sub);font-size:11px;margin:4px 2px">色が濃いほど予約が多い時間帯です。'
+      + '<a href="#/data?store=' + encodeURIComponent(storeName) + '">データタブ</a>で、担当別や再現性でさらに絞り込めます</div>';
+  }
+
+  // ── これからの体験 ──
+  const coming = all.filter(function(r) {
+    return isTrial(r) && r.status === 'accepted' && r.booking_start >= nowIso;
+  }).sort(function(a, b) { return (a.booking_start || '').localeCompare(b.booking_start || ''); });
+  html += '<div class="card" style="border:2px solid ' + col + '"><h3>🆕 これから来店する体験のお客様（' + coming.length + '名）</h3>';
+  if (!coming.length) {
+    html += '<div class="empty">これからの体験のご予約はまだありません</div>';
+  } else {
+    coming.slice(0, 20).forEach(function(r) {
+      const sc = srcByName[pkey(r) + '|' + storeName] || srcByName[pkey(r)]
+        || (/かんざしから自動生成/.test(r.menu || '') ? 'かんざし' : '未設定');
+      html += '<div class="trow">'
+        + '<span class="d future">' + fmtDate(r.booking_start) + '</span>'
+        + '<span>' + fmtTime(r.booking_start) + '</span>'
+        + '<a style="color:var(--accent);text-decoration:none;font-weight:700" href="#/c/'
+        + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
+        + '<span class="badge" style="background:' + (LEAD_STYLE[sc] || LEAD_STYLE['未設定']) + ';font-size:10px">' + esc(sc) + '</span>'
+        + '<span class="tstaff" style="color:var(--sub)">' + esc(resStaffs(r).join('・')) + '</span>'
+        + '</div>';
+    });
+    if (coming.length > 20) {
+      html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">直近20名を表示しています。'
+        + '<a href="#/trial/' + encodeURIComponent(storeName) + '?when=fut">体験タブで全員を見る</a></div>';
+    }
+  }
+  html += '</div>';
+
+  // ── 次回予約がない会員（フォロー対象）──
+  const futSet = {};
+  ((futQ && futQ.data) || []).forEach(function(r) {
+    if (r.status !== 'accepted') return;
+    futSet[custKey(r.merchant_id, r.customer_id)] = true;
+  });
+  const noNext = [];
+  custs.forEach(function(c) {
+    const k = custKey(c.merchant_id, c.customer_id);
+    if (storeOfCust[k] !== storeName) return;
+    const act = (c.subscriptions || []).some(function(sub) {
+      return sub.contract_status === 'active' && !(sub.contract_end_at || '').slice(0, 10);
+    });
+    if (!act || futSet[k]) return;
+    noNext.push(c);
+  });
+  html += '<div class="card"><h3>📞 次回のご予約がない会員（' + noNext.length + '名 / 会員' + members + '名）</h3>';
+  if (!noNext.length) {
+    html += '<div class="empty">全員、次回のご予約が入っています</div>';
+  } else {
+    html += '<div class="chips">' + noNext.slice(0, 60).map(function(c) {
+      return '<span class="chip"><a style="color:var(--accent);text-decoration:none" href="#/c/'
+        + encodeURIComponent(c.merchant_id) + '/' + c.customer_id + '">' + esc(c.name || '（名前なし）') + '</a></span>';
+    }).join('') + '</div>'
+      + (noNext.length > 60 ? '<div style="color:var(--sub);font-size:11px;margin-top:4px">ほか '
+          + (noNext.length - 60) + '名（日報タブに全員分の一覧があります）</div>' : '');
+  }
+  html += '</div>';
+
+  html += '<div class="chips" style="margin-top:10px">'
+    + '<a href="#/?store=' + encodeURIComponent(storeName) + '">この店舗の予約を見る</a>'
+    + '<a href="#/tl?store=' + encodeURIComponent(storeName) + '">タイムライン</a>'
+    + '<a href="#/trial/' + encodeURIComponent(storeName) + '">体験の一覧</a>'
+    + '<a href="#/data?store=' + encodeURIComponent(storeName) + '">シフト設計用データ</a>'
+    + '</div>';
+
+  if (stale(_seq)) return;
+  app.innerHTML = html;
+}
+
 async function render() {
   const { data } = await sb.auth.getSession();
   if (!data.session) { renderLogin(); return; }
@@ -5021,6 +5291,11 @@ async function render() {
     return;
   }
   if (hash.indexOf('#/trial') === 0) { renderTrial(); return; }
+  if (hash.indexOf('#/store/') === 0) {
+    const sp = hash.split('?')[0].split('/');
+    renderStore(decodeURIComponent(sp[2] || ''), new URLSearchParams(hash.split('?')[1] || ''));
+    return;
+  }
   if (hash.indexOf('#/fin') === 0) {
     renderFinance(new URLSearchParams(hash.split('?')[1] || ''));
     return;
