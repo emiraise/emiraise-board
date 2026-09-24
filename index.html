@@ -3647,7 +3647,7 @@ async function renderTrial() {
   function dOf(r) { return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start)); }
 
   function statChips(subset) {
-    const c = subset.filter(function(r) { return !isPortal(r); });
+    const c = subset;   // かんざし経由も新規の体験なので、期間の件数に含める
     const tm = c.filter(function(r) { return dOf(r).slice(0, 7) === ym; }).length;
     const lm = c.filter(function(r) { return dOf(r).slice(0, 7) === lastYm; }).length;
     const wk = c.filter(function(r) { const d = dOf(r); return d >= wkStart && d < wkEnd; }).length;
@@ -3661,7 +3661,8 @@ async function renderTrial() {
       + (nm2 ? chipT('when', 'next', '翌月 ' + nm2 + '件', 'background:#5a67a5;color:#fff', '') : '')
       + chipT('when', 'last', '先月 ' + lm + '件', '', '')
       + chipT('when', 'week', '今週 ' + wk + '件', '', '')
-      + (po ? chipT('when', 'kanzashi', '🔖 かんざし 今月' + po + '件', '', 'かんざし経由の今月のご予約') : '')
+      + (po ? chipT('when', 'kanzashi', 'うち🔖かんざし 今月' + po + '件', '',
+                    '今月の体験' + tm + '件のうち、かんざし経由のご予約') : '')
       + '</div>' + outcomeChips(subset) + srcChips(subset);
   }
   // 月ごとの内訳。同じ方・同じ日・同じ店舗の重複取り込み（STORESとワンモア、
@@ -3905,10 +3906,10 @@ async function renderTrial() {
   function inWhen(r) {
     const d = dOf(r);
     if (selWhen === 'fut')  return r.booking_start >= nowIso && !isCx(r);
-    if (selWhen === 'cur')  return !isPortal(r) && d.slice(0, 7) === ym;
-    if (selWhen === 'next') return !isPortal(r) && d.slice(0, 7) === addDays(ym + '-28', 7).slice(0, 7);
-    if (selWhen === 'last') return !isPortal(r) && d.slice(0, 7) === lastYm;
-    if (selWhen === 'week') return !isPortal(r) && d >= wkStart && d < wkEnd;
+    if (selWhen === 'cur')  return d.slice(0, 7) === ym;
+    if (selWhen === 'next') return d.slice(0, 7) === addDays(ym + '-28', 7).slice(0, 7);
+    if (selWhen === 'last') return d.slice(0, 7) === lastYm;
+    if (selWhen === 'week') return d >= wkStart && d < wkEnd;
     if (selWhen === 'kanzashi') return isPortal(r) && d.slice(0, 7) === ym;
     return true;
   }
