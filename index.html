@@ -3081,7 +3081,7 @@ async function renderStats(params) {
         + '<tr><td style="text-align:left">家賃</td><td>−' + cost.rent + '万円</td></tr>'
         + '<tr><td style="text-align:left">その他固定費（光熱・消耗品・手数料等）</td><td>−' + cost.other + '万円</td></tr>'
         + '<tr style="font-weight:800;background:#eef3f1"><td style="text-align:left">営業利益</td><td style="color:' + (profit >= 0 ? '#2e7d32' : '#b3261e') + '">' + (profit >= 0 ? '+' : '') + profit + '万円（利益率' + margin + '%）</td></tr>'
-        + '</tbody></table>'
+        + '</tbody></table></div>'
         + '<div style="color:var(--sub);font-size:11px;margin-top:4px">人件費内訳: ' + (payLines.join('／') || 'なし') + '<br>'
         + '※家賃・固定費は概算（富山東のみP&L実績）。セミナー等・役員業務・本部費(和田 等)は含みません。実額が分かれば差し替えます</div>'
         + '</div>';
