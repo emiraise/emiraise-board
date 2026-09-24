@@ -1726,6 +1726,18 @@ const STAFF_ORDER = ['林　大地', '齋藤 良気', 'こうじ', 'あやな', 
 const RETIRED_STAFF = ['みわ'];
 // 予約が無い期間でも必ず名簿に出す人。良気さんはシフト表に載らないため抜け落ちていた
 const ALWAYS_STAFF = ['齋藤 良気'];
+// 店舗ごとの勤務スタッフ。店舗ページの名簿をここに載っている人だけにする
+// （2026-09-25 大地さん指定。指定のない店舗は絞り込まない）
+const STORE_STAFF = {
+  '金沢本店': ['林　大地', 'こうじ', 'あやな', 'まこ'],
+};
+function staffOfStore(storeName, list) {
+  const allow = STORE_STAFF[storeName];
+  if (!allow) return list;
+  return list.filter(function(n) {
+    return allow.some(function(x) { return nw(x) === nw(n); });
+  });
+}
 function isRetired(n) {
   return RETIRED_STAFF.some(function(x) { return nw(x) === nw(n); });
 }
@@ -5160,10 +5172,11 @@ async function renderStore(storeName, params) {
   ((midQ && midQ.data) || []).forEach(function(m) { midMap[custKey(m.merchant_id, m.customer_id)] = m; });
   const G = midGroups(((longQ && longQ.data) || []), custs, midMap, storeName);
   const wkStart2 = weekStart(todayS), wkEnd2 = addDays(wkStart2, 7);
+  const twoWeeks = addDays(todayS, 14);
   const thisWeekTrials = all.filter(function(r) {
     const d = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start));
-    return isTrial(r) && r.status === 'accepted' && d >= todayS && d < wkEnd2;
-  });
+    return isTrial(r) && r.status === 'accepted' && d >= todayS && d < twoWeeks;
+  }).sort(function(a, b) { return (a.booking_start || '').localeCompare(b.booking_start || ''); });
   const cxThisWeek = all.filter(function(r) {
     const d = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start));
     return r.status !== 'accepted' && d >= wkStart2 && d < wkEnd2;
@@ -5291,8 +5304,8 @@ async function renderStore(storeName, params) {
       body: nameChips(midAll, '#/mid?store=' + encodeURIComponent(storeName)) });
   }
   if (thisWeekTrials.length) {
-    topics.push({ icon: '🆕', title: '今週の体験 <b>' + thisWeekTrials.length + '名</b>',
-      note: 'カウンセリングシートの準備と、担当の確認',
+    topics.push({ icon: '🆕', title: 'これからの体験 <b>' + thisWeekTrials.length + '名</b>',
+      note: '今日から2週間ぶん。カウンセリングシートの準備と、担当の確認',
       body: nameChips(thisWeekTrials, '#/trial/' + encodeURIComponent(storeName) + '?when=fut') });
   }
   if (noNextPre.length) {
@@ -5367,7 +5380,9 @@ async function renderStore(storeName, params) {
       if (isTrial(r)) o.trial++;
     });
   });
-  const staffNames = sortStaffs(Object.keys(perStaff));
+  let staffNames = sortStaffs(Object.keys(perStaff));
+  const hiddenStaff = staffNames.filter(function(n) { return staffOfStore(storeName, [n]).length === 0; });
+  staffNames = staffOfStore(storeName, staffNames);
   if (staffNames.length) {
     html += '<h3 style="margin:12px 2px 4px">👤 スタッフ別（' + mo + '月）</h3>';
     html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
@@ -5379,6 +5394,13 @@ async function renderStore(storeName, params) {
         + '<td>' + (o.trial || '<span style="color:#bbb">0</span>') + '</td></tr>';
     });
     html += '</tbody></table></div>';
+    if (hiddenStaff.length) {
+      // 黙って消すと数が合わなくなるので、除いた人は必ず書いておく
+      html += '<div style="color:var(--sub);font-size:11px;margin-top:4px">'
+        + 'この店舗の勤務者ではない ' + esc(hiddenStaff.join('・'))
+        + ' のレッスンは表から除いています（' + hiddenStaff.reduce(function(a, n) { return a + perStaff[n].total; }, 0)
+        + '件）</div>';
+    }
   }
 
   // ── 曜日 × 時間帯（直近90日の実績）──
@@ -5420,93 +5442,44 @@ async function renderStore(storeName, params) {
       + '<a href="#/data?store=' + encodeURIComponent(storeName) + '">データタブ</a>で、担当別や再現性でさらに絞り込めます</div>';
   }
 
-  // ── これからの体験 ──
-  const coming = all.filter(function(r) {
-    return isTrial(r) && r.status === 'accepted' && r.booking_start >= nowIso;
-  }).sort(function(a, b) { return (a.booking_start || '').localeCompare(b.booking_start || ''); });
-  html += '<div class="card" style="border:2px solid ' + col + '"><h3>🆕 これから来店する体験のお客様（' + coming.length + '名）</h3>';
-  if (!coming.length) {
-    html += '<div class="empty">これからの体験のご予約はまだありません</div>';
-  } else {
-    coming.slice(0, 20).forEach(function(r) {
-      const sc = srcByName[pkey(r) + '|' + storeName] || srcByName[pkey(r)]
-        || (/かんざしから自動生成/.test(r.menu || '') ? 'かんざし' : '未設定');
-      html += '<div class="trow">'
-        + '<span class="d future">' + fmtDate(r.booking_start) + '</span>'
-        + '<span>' + fmtTime(r.booking_start) + '</span>'
-        + '<a style="color:var(--accent);text-decoration:none;font-weight:700" href="#/c/'
-        + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
-        + '<span class="badge" style="background:' + (LEAD_STYLE[sc] || LEAD_STYLE['未設定']) + ';font-size:10px">' + esc(sc) + '</span>'
-        + '<span class="tstaff" style="color:var(--sub)">' + esc(resStaffs(r).join('・')) + '</span>'
-        + '</div>';
-    });
-    if (coming.length > 20) {
-      html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">直近20名を表示しています。'
-        + '<a href="#/trial/' + encodeURIComponent(storeName) + '?when=fut">体験タブで全員を見る</a></div>';
-    }
-  }
-  html += '</div>';
-
-  // ── 次回予約がない会員（フォロー対象）──
-  const noNext = noNextPre;
-  html += '<div class="card"><h3>📞 次回のご予約がない会員（' + noNext.length + '名 / 会員' + members + '名）</h3>';
-  if (!noNext.length) {
-    html += '<div class="empty">全員、次回のご予約が入っています</div>';
-  } else {
-    html += '<div class="chips">' + noNext.slice(0, 60).map(function(c) {
-      return '<span class="chip"><a style="color:var(--accent);text-decoration:none" href="#/c/'
-        + encodeURIComponent(c.merchant_id) + '/' + c.customer_id + '">' + esc(c.name || '（名前なし）') + '</a></span>';
-    }).join('') + '</div>'
-      + (noNext.length > 60 ? '<div style="color:var(--sub);font-size:11px;margin-top:4px">ほか '
-          + (noNext.length - 60) + '名（日報タブに全員分の一覧があります）</div>' : '');
-  }
-  html += '</div>';
-
   // ── 本日の予約（タイムスケジュール）──
   const todayRows = all.filter(function(r) {
     return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start)) === todayS;
   }).sort(function(a, b) { return (a.booking_start || '').localeCompare(b.booking_start || ''); });
   const todayOk = todayRows.filter(function(r) { return r.status === 'accepted'; });
-  html += '<div class="card"><h3>📅 本日の予約（' + todayS.slice(5).replace('-', '/') + '・'
+  html += '<div class="card"><h3>📅 本日のタイムライン（' + todayS.slice(5).replace('-', '/') + '・'
     + todayOk.length + '件' + (todayRows.length - todayOk.length ? '／キャンセル ' + (todayRows.length - todayOk.length) + '件' : '') + '）</h3>';
   if (!todayRows.length) {
     html += '<div class="empty">本日のご予約はありません</div>';
   } else {
-    // 担当ごとの件数
     const byStaffToday = {};
     todayOk.forEach(function(r) {
       resStaffs(r).forEach(function(sn) { if (!isRetired(sn)) byStaffToday[sn] = (byStaffToday[sn] || 0) + 1; });
     });
-    const sNames = sortStaffs(Object.keys(byStaffToday));
+    const sNames = staffOfStore(storeName, sortStaffs(Object.keys(byStaffToday)));
     if (sNames.length) {
       html += '<div class="chips">' + sNames.map(function(sn) {
         return '<span class="chip">' + esc(sn) + ' <b>' + byStaffToday[sn] + '</b>件</span>';
       }).join('') + '</div>';
     }
-    todayRows.forEach(function(r) {
-      const cx = r.status !== 'accepted';
-      const past = r.booking_start < nowIso;
-      html += '<div class="trow"' + (cx ? ' style="opacity:.55"' : '') + '>'
-        + '<span class="d' + (past || cx ? '' : ' future') + '">' + fmtTime(r.booking_start) + '〜'
-        + (r.booking_end ? fmtTime(r.booking_end) : '') + '</span>'
-        + '<a style="color:var(--accent);text-decoration:none;font-weight:700" href="#/c/'
-        + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
-        + '<span class="tstaff" style="color:var(--sub)">' + esc(resStaffs(r).join('・')) + '</span>'
-        + '<span style="color:var(--sub);font-size:11.5px">' + esc(String(r.menu || '').slice(0, 22)) + '</span>'
-        + (cx ? '<span class="pill" style="background:#f0dede;color:#8a2b22">キャンセル</span>'
-              : (past ? '<span class="pill" style="background:#e7efe9">済</span>'
-                      : '<span class="pill" style="background:#dfeee6;color:#0c7a3e">これから</span>'))
-        + '</div>';
-    });
   }
   // 時間軸（担当ごとの行）。シフトの網かけも出して、空いている時間が見えるようにする
-  const dayShifts = (shiftQ || []).filter(function(x) { return x.date === todayS; });
-  const tlStaff = sortStaffs(withAlways(
-    Object.keys(todayOk.reduce(function(acc, r) {
-      resStaffs(r).forEach(function(sn) { if (!isRetired(sn)) acc[sn] = true; });
-      return acc;
-    }, {})).concat(dayShifts.map(function(x) { return x.staff_name; }).filter(function(n) { return !isRetired(n); }))
-  ));
+  const dayShifts = (shiftQ || []).filter(function(x) {
+    if (x.date !== todayS) return false;
+    const st = x.store || '';
+    if (!st) return true;                                  // 店舗の記載が無い行はどの店か分からないので残す
+    return (SHIFT_STORE_FULL[st] || st) === storeName;
+  });
+  const tlSet = {};
+  todayOk.forEach(function(r) {
+    resStaffs(r).forEach(function(sn) { if (!isRetired(sn)) tlSet[nw(sn)] = sn; });
+  });
+  dayShifts.forEach(function(x) {
+    if (x.staff_name && !isRetired(x.staff_name)) tlSet[nw(x.staff_name)] = x.staff_name;
+  });
+  const tlStaff = staffOfStore(storeName, sortStaffs(withAlways(
+    Object.keys(tlSet).map(function(k) { return tlSet[k]; })
+  )));
   if (tlStaff.length) {
     html += '<div class="tlwrap" style="margin-top:8px"><div class="tl">' + tlHeadHtml();
     tlStaff.forEach(function(sn) {
@@ -5518,6 +5491,17 @@ async function renderStore(storeName, params) {
     html += '</div></div>';
     html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">斜線＝シフト外・休み。'
       + '<a href="#/tl?store=' + encodeURIComponent(storeName) + '">タイムラインタブ</a>では空き枠やブロックまで見られます</div>';
+  }
+  const todayCx = todayRows.filter(function(r) { return r.status !== 'accepted'; });
+  if (todayCx.length) {
+    html += '<div style="margin-top:6px">' + todayCx.map(function(r) {
+      return '<div class="trow" style="opacity:.7">'
+        + '<span class="d">' + fmtTime(r.booking_start) + '</span>'
+        + '<a style="color:var(--accent);text-decoration:none" href="#/c/'
+        + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
+        + '<span class="tstaff" style="color:var(--sub)">' + esc(resStaffs(r).join('・')) + '</span>'
+        + '<span class="pill" style="background:#f0dede;color:#8a2b22">キャンセル</span></div>';
+    }).join('') + '</div>';
   }
   html += '</div>';
 
