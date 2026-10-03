@@ -2841,7 +2841,7 @@ async function renderStats(params) {
   const SCENARIOS = [
     { label: '現体制（11名）', cap: totalCap, note: '' },
     { label: '＋アコ 160枠（2027年4月〜）', cap: totalCap + 160, note: '' },
-    { label: '＋住田 戦力化 160枠', cap: totalCap + 320, note: 'ここで65%運用でも1,000万圏' },
+    { label: '＋住田 戦力化 160枠（2027年1月入社）', cap: totalCap + 320, note: 'ここで65%運用でも1,000万圏' },
   ];
   html += '<h3 style="margin:10px 0 4px">📐 体制別の売上アッパー（実効単価8,740円換算）</h3>';
   html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr><th style="text-align:left">体制</th><th>枠数</th><th>65%運用時</th><th>100%理論値</th></tr></thead><tbody>';
@@ -2920,21 +2920,21 @@ async function renderStats(params) {
   // 前提: ベース10名1,245枠(埋まり率55%→12月60%→4月62%) + ももか=福井(ゆうか曲線=9ヶ月で120) + アコ=富山(1月30→4月正社員)
   // 人件費pc: 6月実績318万(役員65+給与218.5+法定福利33+厚生1)ベース。みわ退職-20・大地報酬25→40(+15)
   // ・和田さん30万込み(8月支払開始・動画編集委託6万の置換で実質+24)・ももか/アコ/住田=22万+法定福利+交通費≒27万込み
-  // （ももか8/14入社=8月は半月14万・アコ10月〜・住田12月〜）
+  // （ももか8/14入社=8月は半月14万・アコ10月〜・住田2027年1月〜）
   const ROADMAP = [
     { ym: '2026-08', lessons: 700, sales: 630, other: 35, pc: 351, note: '福井高柳 8/14オープン／和田 給与開始' },
     { ym: '2026-09', lessons: 727, sales: 654, other: 40, pc: 364, note: 'ももか30' },
     { ym: '2026-10', lessons: 755, sales: 680, other: 30, pc: 391, note: 'アコ採用・研修開始／ももか45' },
     { ym: '2026-11', lessons: 782, sales: 704, other: 30, pc: 391, note: 'ももか60' },
-    { ym: '2026-12', lessons: 817, sales: 735, other: 30, pc: 418, note: '住田採用（天王寺）／埋まり率60%到達' },
-    { ym: '2027-01', lessons: 857, sales: 771, other: 30, pc: 418, note: 'アコ実働30／ももか85' },
-    { ym: '2027-02', lessons: 917, sales: 825, other: 30, pc: 418, note: 'ももか100=福井単店黒字ライン／住田実働30' },
-    { ym: '2027-03', lessons: 957, sales: 861, other: 30, pc: 418, note: 'アコ70／住田40' },
-    { ym: '2027-04', lessons: 1037, sales: 933, other: 30, pc: 418, note: 'アコ正社員(160枠)／住田60' },
-    { ym: '2027-05', lessons: 1072, sales: 965, other: 30, pc: 418, note: 'ももか120到達🎯／住田75' },
-    { ym: '2027-06', lessons: 1102, sales: 992, other: 30, pc: 418, note: 'アコ120／住田90' },
-    { ym: '2027-07', lessons: 1122, sales: 1010, other: 30, pc: 418, note: '🏆 月商1,000万到達ライン' },
-    { ym: '2027-08', lessons: 1140, sales: 1026, other: 30, pc: 418, note: '🎯 目標月（余裕を持って達成）' },
+    { ym: '2026-12', lessons: 817, sales: 735, other: 30, pc: 391, note: '埋まり率60%到達' },
+    { ym: '2027-01', lessons: 857, sales: 771, other: 30, pc: 418, note: '住田採用（天王寺）／アコ実働30／ももか85' },
+    { ym: '2027-02', lessons: 887, sales: 798, other: 30, pc: 418, note: 'ももか100=福井単店黒字ライン／住田は研修中' },
+    { ym: '2027-03', lessons: 947, sales: 852, other: 30, pc: 418, note: 'アコ70／住田実働30' },
+    { ym: '2027-04', lessons: 1017, sales: 915, other: 30, pc: 418, note: 'アコ正社員(160枠)／住田40' },
+    { ym: '2027-05', lessons: 1057, sales: 951, other: 30, pc: 418, note: 'ももか120到達🎯／住田60' },
+    { ym: '2027-06', lessons: 1087, sales: 978, other: 30, pc: 418, note: 'アコ120／住田75' },
+    { ym: '2027-07', lessons: 1112, sales: 1001, other: 30, pc: 418, note: '🏆 月商1,000万到達ライン' },
+    { ym: '2027-08', lessons: 1130, sales: 1017, other: 30, pc: 418, note: '🎯 目標月（余裕を持って達成）' },
   ];
   html += '<h3 style="margin:12px 0 4px">📈 1,000万ロードマップ（月次見通し）</h3>';
   html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr><th>月</th><th>見込みレッスン</th><th>レッスン売上</th><th>セミナー等</th><th>総売上</th><th>人件費</th><th>人件費率</th><th>実績</th><th style="text-align:left">マイルストーン</th></tr></thead><tbody>';
@@ -5112,7 +5112,7 @@ async function renderStore(storeName, params) {
   const nowIso = new Date().toISOString();
   const y = parseInt(ym.slice(0, 4), 10), mo = parseInt(ym.slice(5, 7), 10);
 
-  const [monQ, custQ, trialQ, outQ, nameQ, futQ, longQ, midQ, askQ, shiftQ, codesQ,
+  const [monQ, custQ, trialQ, outQ, nameQ, futQ, longQ, midQ, askQ, shiftQ, codesQ, monShiftQ,
          blkQ, calQ, availQ, stBlkQ] = await Promise.all([
     fetchRange(first, nextFirst),
     fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,name,kana,subscriptions,ticket_books,memo,first_reserved_at'),
@@ -5129,6 +5129,7 @@ async function renderStore(storeName, params) {
     sb.from('crm_review_asks').select('name_key,asked_at,asked_by').limit(2000),
     fetchShifts(todayS, addDays(todayS, 1)),
     shiftCodes(),
+    fetchShifts(first, nextFirst),
     fetchBlocks(todayS, addDays(todayS, 1)),
     fetchCalEvents(todayS, addDays(todayS, 1)),
     fetchAvail(todayS, addDays(todayS, 1)),
@@ -5510,6 +5511,63 @@ async function renderStore(storeName, params) {
         + ' のレッスンは表から除いています（' + hiddenStaff.reduce(function(a, n) { return a + perStaff[n].total; }, 0)
         + '件）</div>';
     }
+  }
+
+  // ── その月のシフト表（Googleドライブのシフト表をそのまま並べたもの）──
+  // 「10月のシフトが反映されていない」と見えたが、取り込みはできていて
+  //  店舗ページに出す場所が無かっただけだった（2026-10-03 大地さん指摘）
+  const monShifts = (monShiftQ || []).filter(function(x) {
+    const st = x.store || '';
+    if (st && (SHIFT_STORE_FULL[st] || st) !== storeName) return false;
+    return !isRetired(x.staff_name);
+  });
+  const shDays = [];
+  for (let d = first; d < nextFirst; d = addDays(d, 1)) shDays.push(d);
+  const shBy = {};
+  monShifts.forEach(function(x) {
+    (shBy[nw(x.staff_name)] = shBy[nw(x.staff_name)] || {})[x.date] = x;
+  });
+  const shNames = staffOfStore(storeName, sortStaffs(withAlways(
+    Object.keys(monShifts.reduce(function(a, x) { a[nw(x.staff_name)] = x.staff_name; return a; }, {}))
+      .map(function(k) {
+        return monShifts.filter(function(x) { return nw(x.staff_name) === k; })[0].staff_name;
+      })
+  )));
+  html += '<h3 style="margin:12px 2px 4px">🗓 ' + mo + '月のシフト表</h3>';
+  if (!shNames.length) {
+    html += '<div class="empty">この月のシフト表がまだ取り込まれていません'
+      + '（Googleドライブのシフト表を6時間ごとに自動で読み込んでいます）</div>';
+  } else {
+    html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr><th>スタッフ</th>';
+    shDays.forEach(function(d) {
+      const w = dowOfYmd(d);
+      const we = (w === 0 || w === 6) ? ';background:#f3e9e9' : '';
+      html += '<th style="padding:4px 2px;font-size:10.5px' + we + '">'
+        + parseInt(d.slice(8, 10), 10) + '<br><small>' + DOW_LABEL[w] + '</small></th>';
+    });
+    html += '<th>出勤</th></tr></thead><tbody>';
+    shNames.forEach(function(sn) {
+      const row = shBy[nw(sn)] || {};
+      let work = 0;
+      html += '<tr><td style="text-align:left;white-space:nowrap">' + esc(sn) + '</td>';
+      shDays.forEach(function(d) {
+        const x = row[d];
+        let txt = '', bg = '', col = '';
+        if (x) {
+          if (x.kind === 'off') { txt = '休'; bg = '#fdecec'; col = '#b3261e'; }
+          else if (x.kind === 'other') { txt = String(x.label || '他').slice(0, 2); bg = '#e8ecf7'; col = '#3b4a7a'; }
+          else { txt = x.code || '○'; bg = '#e3efe8'; col = '#15543d'; work++; }
+        }
+        html += '<td style="padding:4px 2px;font-size:10.5px;background:' + (bg || 'transparent')
+          + ';color:' + (col || '#bbb') + ';font-weight:700">' + esc(txt) + '</td>';
+      });
+      html += '<td style="font-weight:700">' + work + '日</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    html += '<div style="color:var(--sub);font-size:11px;margin:4px 2px">'
+      + 'Googleドライブのシフト表から6時間ごとに自動で取り込んでいます（手で入れる必要はありません）。'
+      + '緑＝出勤（記号はシフトコード）／赤＝休み／青＝研修・会議・出張。'
+      + '記号の時間は<a href="#/tl?store=' + encodeURIComponent(storeName) + '">タイムラインタブ</a>で確認できます</div>';
   }
 
   // ── 曜日 × 時間帯（直近90日の実績）──
