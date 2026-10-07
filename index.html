@@ -3569,6 +3569,8 @@ async function renderTrial() {
   const selSrc = decodeURIComponent((hPath.split('/')[3] || ''));
   const selWhen = hQuery.get('when') || '';   // 時期の絞り込み（これから／今月／先月…）
   const selRes  = hQuery.get('res')  || '';   // 結果の絞り込み（成約／未成約／キャンセル／振替）
+  const selSort = hQuery.get('sort') || '';   // 並び（既定=体験日順／made=予約が入った順）
+  const selView = hQuery.get('view') || '';   // 表示（既定=一覧／store=店舗別に並べる）
   // 同じチップをもう一度押すと解除。店舗と経路はパス、それ以外はクエリで持つ
   function linkT(key, val) {
     const q2 = new URLSearchParams(hQuery.toString());
@@ -3579,7 +3581,9 @@ async function renderTrial() {
     return base + (qs ? '?' + qs : '');
   }
   function chipT(key, val, label, style, title) {
-    const on = hQuery.get(key) === val;
+    // val が空のチップは「既定」。その項目を何も選んでいないときに選択中にする
+    const cur = hQuery.get(key) || '';
+    const on = cur === val;
     return '<a href="' + linkT(key, val) + '"' + (on ? ' class="on"' : '')
       + (on ? '' : (style ? ' style="' + style + '"' : ''))
       + ' title="' + esc(on ? 'もう一度押すと解除します' : (title || '押すと絞り込みます')) + '">'
@@ -3864,7 +3868,63 @@ async function renderTrial() {
     });
     return o + '</div>';
   }
+  // 「予約が入った順」。新しく入った予約から並べる（新規に気づくため）
+  function sortRows(list) {
+    const a = list.slice();
+    if (selSort === 'made') {
+      a.sort(function(x, y) {
+        return String(y.booking_made || '').localeCompare(String(x.booking_made || ''))
+          || String(y.booking_start || '').localeCompare(String(x.booking_start || ''));
+      });
+    } else {
+      a.sort(function(x, y) { return String(y.booking_start || '').localeCompare(String(x.booking_start || '')); });
+    }
+    return a;
+  }
+  // 5店舗を横に並べて1ページで見る
+  function storeColsHtml(subset) {
+    const cols = STORE_ORDER_ALL.slice();
+    const by = {};
+    subset.forEach(function(r) {
+      const k = r.store_tag || '店舗不明';
+      (by[k] = by[k] || []).push(r);
+    });
+    Object.keys(by).forEach(function(k) { if (cols.indexOf(k) < 0) cols.push(k); });
+    let o = '<div class="storecols">';
+    cols.forEach(function(st) {
+      const list = sortRows(by[st] || []);
+      const visited = list.filter(function(r) { return !isCx(r) && dOf(r) < jstToday(); });
+      const won = visited.filter(function(r) { return isWon(outcome[personKey(r)] || outcome[nameKey(r.customer_name)] || {}); }).length;
+      const cx = list.filter(function(r) { return isCx(r); }).length;
+      o += '<div class="card" style="padding:8px 10px">'
+        + '<div style="font-weight:800;margin-bottom:4px"><span class="badge" style="background:' + storeColor(st) + '">'
+        + esc(st) + '</span> <span style="font-size:13px">' + list.length + '件</span></div>'
+        + '<div style="font-size:11px;color:var(--sub);margin-bottom:6px">来店' + visited.length
+        + '・<span style="color:#0c7a3e;font-weight:700">成約' + won + '</span>'
+        + (visited.length ? '（' + Math.round(won * 100 / visited.length) + '%）' : '')
+        + (cx ? '・<span style="color:#b3261e">キャンセル' + cx + '</span>' : '') + '</div>';
+      if (!list.length) {
+        o += '<div style="color:var(--sub);font-size:11.5px">この条件のご予約はありません</div>';
+      } else {
+        list.forEach(function(r) {
+          const sc = srcOf(r);
+          o += '<div class="row" style="display:flex;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)">'
+            + '<span class="time" style="color:var(--sub);white-space:nowrap">' + fmtDate(r.booking_start) + '</span>'
+            + '<a class="cust" style="color:var(--accent);text-decoration:none;font-weight:700;flex:1" href="#/c/'
+            + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
+            + '<span class="badge" style="background:' + (LEAD_STYLE[sc.src] || LEAD_STYLE['未設定']) + '">' + esc(sc.src) + '</span>'
+            + outcomeTag(r) + '</div>';
+          if (selSort === 'made' && r.booking_made) {
+            o += '<div style="font-size:10px;color:var(--sub);margin:-3px 0 2px 2px">予約 ' + esc(fmtStamp(r.booking_made)) + '</div>';
+          }
+        });
+      }
+      o += '</div>';
+    });
+    return o + '</div>';
+  }
   function listHtml(subset, showStore) {
+    if (selView === 'store') return storeColsHtml(subset);
     if (!subset.length) {
       return (selWhen || selRes)
         ? '<div class="empty">この絞り込みに当てはまる方はいません。もう一度チップを押すと解除できます</div>'
@@ -3891,13 +3951,21 @@ async function renderTrial() {
     }
     out += '<div class="card">';
     let curYm2 = '';
-    subset.forEach(function(r) {
-      const d = dOf(r);
-      if (d.slice(0, 7) !== curYm2) {
-        curYm2 = d.slice(0, 7);
-        const mrows = subset.filter(function(x) { return dOf(x).slice(0, 7) === curYm2; });
-        out += '<div class="mhead">' + parseInt(curYm2.slice(0, 5), 10) + '年' + parseInt(curYm2.slice(5, 7), 10) + '月'
-          + monthStatsHtml(mrows) + '</div>';
+    sortRows(subset).forEach(function(r) {
+      // 「予約が入った順」のときは、ご予約が入った月で区切る
+      const key = selSort === 'made'
+        ? String(r.booking_made || '').slice(0, 7) : dOf(r).slice(0, 7);
+      if (key !== curYm2) {
+        curYm2 = key;
+        if (selSort === 'made') {
+          out += '<div class="mhead">' + (curYm2
+            ? parseInt(curYm2.slice(0, 4), 10) + '年' + parseInt(curYm2.slice(5, 7), 10) + '月に入ったご予約'
+            : '予約日時の記録がないもの（8月より前・天王寺）') + '</div>';
+        } else {
+          const mrows = subset.filter(function(x) { return dOf(x).slice(0, 7) === curYm2; });
+          out += '<div class="mhead">' + parseInt(curYm2.slice(0, 5), 10) + '年' + parseInt(curYm2.slice(5, 7), 10) + '月'
+            + monthStatsHtml(mrows) + '</div>';
+        }
       }
       const future = r.booking_start >= nowIso;
       out += '<div class="trow"' + (isCx(r) ? ' style="opacity:.62"' : '') + '>'
@@ -3932,6 +4000,14 @@ async function renderTrial() {
     html += '<a href="#/trial/' + encodeURIComponent(k) + sfx + qsKeep + '"' + (selStore === k ? ' class="on"' : '') + '>' + esc(k) + ' ' + stores[k].length + '</a>';
   });
   html += '</div>';
+  html += '<div class="chips" style="margin-top:2px">'
+    + '<span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px">並び</span>'
+    + chipT('sort', '', '体験日順', '', '体験の日付が新しい順')
+    + chipT('sort', 'made', '🕒 予約が入った順', '', 'ご予約が入った日時の新しい順。新規が入ったことに気づきやすい')
+    + '<span style="font-size:11px;color:var(--sub);align-self:center;margin:0 2px 0 8px">表示</span>'
+    + chipT('view', '', '一覧', '', '1列で時系列に並べる')
+    + chipT('view', 'store', '🏬 店舗別に並べる', '', '5店舗を横に並べて1ページで見る')
+    + '</div>';
 
   const byStore = selStore ? (stores[selStore] || []) : rows;
   html += statChips(byStore);
