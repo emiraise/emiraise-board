@@ -3906,7 +3906,26 @@ async function renderTrial() {
       if (!list.length) {
         o += '<div style="color:var(--sub);font-size:11.5px">この条件のご予約はありません</div>';
       } else {
+        // 月の変わり目に区切りを入れる（10月と9月が混ざって見えないように）
+        function ymOf(r) {
+          return selSort === 'made' ? String(r.booking_made || '').slice(0, 7) : dOf(r).slice(0, 7);
+        }
+        const cnt = {};
+        list.forEach(function(r) { const k = ymOf(r); cnt[k] = (cnt[k] || 0) + 1; });
+        let curM = null;
         list.forEach(function(r) {
+          const k = ymOf(r);
+          if (k !== curM) {
+            curM = k;
+            o += '<div style="display:flex;align-items:center;gap:6px;margin:8px 0 2px">'
+              + '<b style="font-size:12px;color:var(--accent);white-space:nowrap">'
+              + (k ? parseInt(k.slice(0, 4), 10) + '年' + parseInt(k.slice(5, 7), 10) + '月'
+                   + (selSort === 'made' ? 'に入った' : '') : '日付の記録なし')
+              + '</b>'
+              + '<span style="font-size:10.5px;color:var(--sub);white-space:nowrap">' + (cnt[k] || 0) + '件</span>'
+              + '<span style="flex:1;height:2px;background:' + storeColor(st) + ';opacity:.45;border-radius:2px"></span>'
+              + '</div>';
+          }
           const sc = srcOf(r);
           o += '<div class="row" style="display:flex;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)">'
             + '<span class="time" style="color:var(--sub);white-space:nowrap">' + fmtDate(r.booking_start) + '</span>'
