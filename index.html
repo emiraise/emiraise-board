@@ -234,8 +234,14 @@
      1行おきに色を変え、触れている行を強調する（スタッフ要望・2026-09-10） */
   .rep.zebra tbody tr:nth-child(even) td { background:#f2f6f4; }
   /* 定例ToDoの月カレンダー（月曜始まり） */
-  .rep.todocal td { vertical-align:top; text-align:left; padding:3px 4px; }
-  .rep.todocal th { font-size:11px; padding:4px 2px; }
+  .rep.todocal { table-layout:fixed; min-width:700px; }
+  /* 定例ToDoの一覧。折り返しを許して、操作の文字が切れないようにする */
+  .tdrow { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px;
+           padding:8px 2px; border-bottom:1px solid var(--line); font-size:13px; }
+  .tdrow .ttl { flex:1 1 14em; font-weight:600; min-width:0; }
+  .tdrow .act { margin-left:auto; white-space:nowrap; }
+  .rep.todocal td { vertical-align:top; text-align:left; padding:4px 5px; }
+  .rep.todocal th { font-size:12.5px; padding:5px 2px; }
   .rep.todocal td:first-child { position:static; }
   .rep.todocal .tdchip { white-space:normal; overflow-wrap:anywhere; }
   .rep.zebra tbody tr:nth-child(even) td:first-child { background:#f2f6f4; }
@@ -5312,6 +5318,26 @@ function todoNextDue(rule, todayS) {
   }
   return null;
 }
+// 定例ToDoの区分ごとの色と目印（2026-10-11 見やすさの調整）
+const TODO_CAT = {
+  '会議':     { i: '🧑‍🤝‍🧑', bg: '#dde6f7', fg: '#2a3f6b', bar: '#5a67a5' },
+  '教育':     { i: '🎓', bg: '#e8dff5', fg: '#4b2d75', bar: '#7a4fb5' },
+  '在庫管理': { i: '📦', bg: '#fbe6cf', fg: '#7a4a12', bar: '#c07a2a' },
+  '売上管理': { i: '💰', bg: '#dff0e4', fg: '#1d5c33', bar: '#2e7d55' },
+  '継続管理': { i: '📈', bg: '#dff0e4', fg: '#1d5c33', bar: '#2e7d55' },
+  'フォロー': { i: '📮', bg: '#fbdede', fg: '#8a2b22', bar: '#b3261e' },
+  '口コミ管理': { i: '⭐', bg: '#fbf2cf', fg: '#6b5712', bar: '#c9a227' },
+  '予約管理': { i: '🗓', bg: '#d8eef0', fg: '#15555c', bar: '#2986a5' },
+  '顧客対応': { i: '💬', bg: '#f6dcea', fg: '#7a1f55', bar: '#a5006e' },
+  '契約管理': { i: '📝', bg: '#e4e8f3', fg: '#3b4a7a', bar: '#5a67a5' },
+  '情報共有': { i: '📣', bg: '#e8f0dc', fg: '#3f5a1c', bar: '#6a7f00' },
+  'MEO':      { i: '📍', bg: '#e8f0dc', fg: '#3f5a1c', bar: '#6a7f00' },
+  '集客':     { i: '🎯', bg: '#fbe0d4', fg: '#7a3312', bar: '#b0743a' },
+};
+function todoCat(name) {
+  return TODO_CAT[String(name || '').trim()]
+    || { i: '•', bg: '#e9edec', fg: '#41504a', bar: '#8c9b93' };
+}
 // その月に当てはまる日を全部返す（カレンダーに置くため）。
 // 毎日・週2回のような「頻度もの」はマスに置かず、上の帯でまとめて出す
 function todoDatesInMonth(rule, ym) {
@@ -5667,10 +5693,28 @@ async function renderMyPage(params) {
               + '<span style="color:var(--sub);font-size:10px">　' + esc(x.t.when_text) + '</span></span>';
           }).join('') + '</div>';
     }
+    // 色の意味（この月に出てくる区分だけ）
+    const catsUsed = [];
+    Object.keys(onDay).forEach(function(d) {
+      onDay[d].forEach(function(it) {
+        const c = (it.x.t.category || '').trim();
+        if (c && catsUsed.indexOf(c) < 0) catsUsed.push(c);
+      });
+    });
+    if (catsUsed.length) {
+      o += '<div class="chips" style="margin-top:6px">'
+        + '<span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px">色の意味</span>'
+        + catsUsed.map(function(c) {
+            const k = todoCat(c);
+            return '<span class="chip" style="background:' + k.bg + ';color:' + k.fg
+              + ';border-left:4px solid ' + k.bar + ';font-size:11.5px">' + k.i + ' ' + esc(c) + '</span>';
+          }).join('') + '</div>';
+    }
     o += '<div class="tlwrap" style="padding:0;margin-top:6px"><table class="rep todocal"><thead><tr>';
     [1, 2, 3, 4, 5, 6, 0].forEach(function(w) {
-      o += '<th style="width:14.2%' + (w === 0 || w === 6 ? ';background:#f3e9e9' : '') + '">'
-        + DOW_LABEL[w] + '</th>';
+      o += '<th style="width:14.2%;font-size:12.5px'
+        + (w === 6 ? ';background:#e2ecf5;color:#1f4e79' : (w === 0 ? ';background:#f7e3e3;color:#8a2b22' : ''))
+        + '">' + DOW_LABEL[w] + '</th>';
     });
     o += '</tr></thead><tbody>';
     for (let d = gridStart; d < gridEnd; ) {
@@ -5678,13 +5722,27 @@ async function renderMyPage(params) {
       for (let i = 0; i < 7; i++, d = addDays(d, 1)) {
         const inMonth = d.slice(0, 7) === calYm;
         const isToday = d === todayS;
+        const w = dowOfYmd(d);
         const list = onDay[d] || [];
-        o += '<td style="vertical-align:top;text-align:left;height:68px;padding:3px 4px'
-          + (inMonth ? '' : ';background:#f4f6f5;color:#bbb')
-          + (isToday ? ';outline:2px solid var(--accent);outline-offset:-2px' : '') + '">'
-          + '<div style="font-size:11px;font-weight:' + (isToday ? '800' : '600') + ';color:'
-          + (isToday ? 'var(--accent)' : (inMonth ? 'var(--sub)' : '#ccc')) + '">'
-          + parseInt(d.slice(8, 10), 10) + '</div>';
+        const left = list.filter(function(it) {
+          return !doneSet[it.x.t.id + '|' + myStore + '|' + d];
+        }).length;
+        let cellBg = '';
+        if (!inMonth) cellBg = ';background:#f4f6f5;color:#c3c9c6';
+        else if (isToday) cellBg = ';background:#e4f2ea';
+        else if (w === 0) cellBg = ';background:#fdf6f6';
+        else if (w === 6) cellBg = ';background:#f5f9fc';
+        o += '<td style="vertical-align:top;text-align:left;height:84px;padding:4px 5px' + cellBg
+          + (isToday ? ';box-shadow:inset 0 0 0 2px var(--accent)' : '') + '">'
+          + '<div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">'
+          + '<span style="font-size:' + (isToday ? '15px' : '13px') + ';font-weight:'
+          + (isToday ? '800' : '700') + ';color:'
+          + (isToday ? 'var(--accent)' : (!inMonth ? '#c3c9c6' : (w === 0 ? '#b3261e' : (w === 6 ? '#1f4e79' : '#41504a')))) + '">'
+          + parseInt(d.slice(8, 10), 10) + '</span>'
+          + (isToday ? '<span style="font-size:9.5px;background:var(--accent);color:#fff;border-radius:99px;padding:1px 6px">今日</span>' : '')
+          + (left ? '<span style="margin-left:auto;font-size:9.5px;background:#b3261e;color:#fff;'
+                    + 'border-radius:99px;padding:1px 6px;font-weight:700">残' + left + '</span>' : '')
+          + '</div>';
         list.forEach(function(it) {
           const x = it.x;
           const rec = doneSet[x.t.id + '|' + myStore + '|' + d];   // 記録はその回ごと
@@ -5693,13 +5751,16 @@ async function renderMyPage(params) {
           const past = d < todayS;
           const bg = skip ? '#eceeed' : (done ? '#e3efe8' : (past ? '#f3dede' : '#e8ecf7'));
           const fg = skip ? '#8c9391' : (done ? '#0c7a3e' : (past ? '#8a2b22' : '#3b4a7a'));
-          o += '<div class="tdchip" style="font-size:10.5px;line-height:1.3;margin-top:2px;padding:2px 4px;'
-            + 'border-radius:5px;background:' + bg + ';color:' + fg + ';'
-            + (rec ? 'text-decoration:line-through;opacity:.75;' : '') + '" '
+          const k = todoCat(x.t.category);
+          o += '<div class="tdchip" style="font-size:11.5px;line-height:1.35;margin-top:3px;padding:3px 5px;'
+            + 'border-radius:6px;border-left:4px solid ' + (rec ? '#c3c9c6' : k.bar) + ';'
+            + 'background:' + (rec ? bg : k.bg) + ';color:' + (rec ? fg : k.fg) + ';'
+            + (rec ? 'text-decoration:line-through;opacity:.7;' : 'font-weight:600;') + '" '
             + 'title="' + esc(x.t.title + '（' + x.t.when_text + '・' + x.t.owner + '）'
                             + (it.moved ? ' ※' + it.from + ' から動かしています' : '')
                             + (skip ? ' ※この回はなしにしています' : '')) + '">'
-            + (it.moved ? '↷' : '') + (skip ? '－' : '') + esc(String(x.t.title).slice(0, 10)) + '</div>';
+            + (skip ? '－ ' : (done ? '✅ ' : k.i + ' '))
+            + (it.moved ? '↷' : '') + esc(x.t.title) + '</div>';
         });
         o += '</td>';
       }
@@ -5718,16 +5779,17 @@ async function renderMyPage(params) {
         const x = e.it.x;
         const rec = doneSet[x.t.id + '|' + myStore + '|' + e.d];
         const skip = rec && rec.status === 'skip';
-        o += '<div class="trow"' + (rec ? ' style="opacity:.72"' : '') + '>'
+        o += '<div class="tdrow"' + (rec ? ' style="opacity:.72"' : '') + '>'
           + '<input type="date" class="tdmove" value="' + e.d + '" data-id="' + esc(x.t.id) + '"'
           + ' data-from="' + e.it.from + '" data-ym="' + calYm + '"'
           + ' style="border:1px solid var(--line);border-radius:8px;padding:4px 6px;font-size:12px">'
-          + '<span class="badge" style="background:#e4e8f3;color:#3b4a7a">' + esc(x.t.category || '') + '</span>'
-          + '<span style="flex:1;font-weight:600">' + esc(x.t.title) + '</span>'
-          + '<span style="color:var(--sub);font-size:11px">' + esc(x.t.when_text || '') + '</span>'
-          + (e.it.moved ? '<a href="javascript:void(0)" class="tdreset" data-id="' + esc(x.t.id)
-              + '" data-from="' + e.it.from + '" data-ym="' + calYm + '">日付を戻す</a>' : '<span></span>')
-          + (rec
+          + '<span class="badge" style="background:' + todoCat(x.t.category).bar + ';color:#fff;white-space:nowrap">'
+          + todoCat(x.t.category).i + ' ' + esc(x.t.category || '') + '</span>'
+          + '<span class="ttl">' + esc(x.t.title) + '</span>'
+          + '<span style="color:var(--sub);font-size:11px;white-space:nowrap">' + esc(x.t.when_text || '') + '</span>'
+          + (e.it.moved ? '<a href="javascript:void(0)" class="tdreset" style="white-space:nowrap" data-id="' + esc(x.t.id)
+              + '" data-from="' + e.it.from + '" data-ym="' + calYm + '">日付を戻す</a>' : '')
+          + '<span class="act">' + (rec
               ? '<span>' + (skip
                   ? '<span style="color:var(--sub)">－ なし（' + esc(rec.done_by || '') + '）</span>'
                   : '<span style="color:#0c7a3e">✅ 済み（' + esc(rec.done_by || '') + '）</span>')
@@ -5736,7 +5798,7 @@ async function renderMyPage(params) {
               : '<span><a href="javascript:void(0)" class="todoDone" data-id="' + esc(x.t.id)
                 + '" data-p="' + e.d + '">済みにする</a>'
                 + ' / <a href="javascript:void(0)" class="todoSkip" data-id="' + esc(x.t.id)
-                + '" data-p="' + e.d + '">なしにする</a></span>')
+                + '" data-p="' + e.d + '">なしにする</a></span>') + '</span>'
           + '</div>';
       });
     }
@@ -6015,20 +6077,28 @@ async function renderOpenSlots(params) {
   const need      = parseInt(params.get('n') || '1', 10);          // 連続で取りたい枠数
   const fromH     = parseInt(params.get('from') || '9', 10);       // 開始時刻の下限
   const toH       = parseInt(params.get('to') || '21', 10);        // 開始時刻の上限
+  const monthSel  = params.get('month') || '';        // cur=今月 / next=来月（1日〜末日）
   const days      = parseInt(params.get('days') || '14', 10);
   const showKinds = multi('kind');                                  // open / closed / overtime
   const together  = parseInt(params.get('together') || '1', 10);    // 同じ時間に何人そろってほしいか
 
-  const lastDay = addDays(todayS, days);
+  // 月を選んだときは、その月の1日〜末日。過去は探しても仕方ないので今日から
+  let fromDay = todayS, lastDay = addDays(todayS, days);
+  if (monthSel) {
+    const base = monthSel === 'next' ? addDays(todayS.slice(0, 7) + '-28', 7).slice(0, 7) : todayS.slice(0, 7);
+    const first = base + '-01';
+    fromDay = first > todayS ? first : todayS;
+    lastDay = addDays(addDays(base + '-28', 7).slice(0, 7) + '-01', 0);   // 翌月1日＝その月の末日の次
+  }
   const [availQ, shiftQ, codesQ, resQ, blkQ, calQ, stBlkQ, askQ] = await Promise.all([
-    fetchAvail(todayS, lastDay),
-    fetchShifts(todayS, lastDay),
+    fetchAvail(fromDay, lastDay),
+    fetchShifts(fromDay, lastDay),
     shiftCodes(),
-    fetchRange(todayS, lastDay),
-    fetchBlocks(todayS, lastDay),
-    fetchCalEvents(todayS, lastDay),
-    fetchStoresBlocks(todayS, lastDay),
-    sb.from('crm_slot_asks').select('*').gte('date', todayS).limit(2000),
+    fetchRange(fromDay, lastDay),
+    fetchBlocks(fromDay, lastDay),
+    fetchCalEvents(fromDay, lastDay),
+    fetchStoresBlocks(fromDay, lastDay),
+    sb.from('crm_slot_asks').select('*').gte('date', fromDay).limit(2000),
   ]);
   if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
   if (stale(_seq)) return;
@@ -6040,7 +6110,7 @@ async function renderOpenSlots(params) {
 
   // 日付ごとに、スタッフの「出勤している時間」「すでに埋まっている時間」を組み立てる
   let rows = [];
-  for (let d = todayS; d < lastDay; d = addDays(d, 1)) {
+  for (let d = fromDay; d < lastDay; d = addDays(d, 1)) {
     const w = dowOfYmd(d);
     if (selDows.length && selDows.indexOf(String(w)) < 0) continue;
     const dShifts = (shiftQ || []).filter(function(x) { return x.date === d; });
@@ -6160,8 +6230,12 @@ async function renderOpenSlots(params) {
                 why: 'シフトの前後90分以内です。本人に打診してOKをもらってから開けます' },
   };
 
+  const spanLabel = monthSel
+    ? (parseInt(fromDay.slice(5, 7), 10) + '/' + parseInt(fromDay.slice(8, 10), 10) + '〜'
+       + parseInt(addDays(lastDay, -1).slice(5, 7), 10) + '/' + parseInt(addDays(lastDay, -1).slice(8, 10), 10))
+    : '今日から' + days + '日ぶん';
   let html = '<h2>🔍 空き枠さがし<small style="font-weight:400;color:var(--sub);font-size:12px">　'
-    + '今日から' + days + '日ぶん・' + rows.length + '件</small></h2>';
+    + spanLabel + '・' + rows.length + '件</small></h2>';
 
   function chips(label, items, cur, key) {
     let o = '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:52px">'
@@ -6197,7 +6271,18 @@ async function renderOpenSlots(params) {
   html += pick('連続', [1,2,3].map(function(n) { return { v: n, t: n + '枠つづけて' }; }), need, 'n');
   html += pick('開始', [9,10,11,12,13,14,15,16,17,18,19,20].map(function(h) {
       return { v: h, t: h + '時〜' }; }), fromH, 'from');
-  html += pick('期間', [7,14,28].map(function(n) { return { v: n, t: '今後' + n + '日' }; }), days, 'days');
+  // 期間。シフトが出たあと現場で翌月の予約を取るので、月まるごとも選べるようにする
+  const nextLabel = parseInt(addDays(todayS.slice(0, 7) + '-28', 7).slice(5, 7), 10) + '月';
+  html += '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:52px">期間</span>'
+    + [7, 14, 28].map(function(n) {
+        const q = {}; q.days = n; q.month = '';
+        return '<a href="' + link(q) + '"' + (!monthSel && days === n ? ' class="on"' : '') + '>今後' + n + '日</a>';
+      }).join('')
+    + '<a href="' + link({ month: 'cur' }) + '"' + (monthSel === 'cur' ? ' class="on"' : '')
+    + ' title="今月の末日まで">今月いっぱい</a>'
+    + '<a href="' + link({ month: 'next' }) + '"' + (monthSel === 'next' ? ' class="on"' : '')
+    + ' title="来月1日から末日まで">🗓 ' + nextLabel + '（1日〜末日）</a>'
+    + '</div>';
   html += pick('同時に', [1,2,3].map(function(n) {
       return { v: n, t: n === 1 ? '1人でよい' : n + '人そろう' }; }), together, 'together');
   html += chips('種類', Object.keys(KIND).map(function(k) { return { v: k, t: KIND[k].t }; }), showKinds, 'kind');
@@ -6268,6 +6353,7 @@ async function renderOpenSlots(params) {
     + '🟢はSTORESの公開情報（10分ごと更新）なので確実です。'
     + '🟡と🟠はシフト表と予約から計算した推定なので、開ける前に必ず本人に確認してください。'
     + '🟠はシフトの前後90分以内だけを出しています。'
+    + 'シフトは毎月10日に翌月ぶんが出ます。出たあとは「' + nextLabel + '（1日〜末日）」で来月の枠をまとめて探せます。'
     + '「2人そろう」は同じ店舗・同じ開始時刻に2人以上が空いている枠だけを出します（ペアレッスン用）</div>';
 
   if (stale(_seq)) return;
