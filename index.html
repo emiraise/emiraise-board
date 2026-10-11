@@ -5423,10 +5423,11 @@ async function renderMyPage() {
   const myAsks = ((askQ && askQ.data) || []).filter(function(a) {
     return nw(a.staff_name) === nw(me) && a.status === 'asked';
   }).sort(function(a, b) { return a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time); });
+  let secAsk = '';
   if (myAsks.length) {
-    html += '<div class="card" style="border-left:5px solid #b0743a"><h3>🙋 あなたへの打診（' + myAsks.length + '件）</h3>';
+    secAsk += '<div class="card" style="border-left:5px solid #b0743a"><h3>🙋 あなたへの打診（' + myAsks.length + '件）</h3>';
     myAsks.forEach(function(a) {
-      html += '<div class="trow">'
+      secAsk += '<div class="trow">'
         + '<span class="d">' + parseInt(a.date.slice(5, 7), 10) + '/' + parseInt(a.date.slice(8, 10), 10)
         + '(' + DOW_LABEL[dowOfYmd(a.date)] + ')</span>'
         + '<span style="font-weight:700">' + esc(a.start_time) + '〜' + esc(a.end_time) + '</span>'
@@ -5437,17 +5438,17 @@ async function renderMyPage() {
         + ' / <a href="javascript:void(0)" class="means" data-id="' + a.id + '" data-v="ng">むずかしい</a></span>'
         + '</div>';
     });
-    html += '<div style="color:var(--sub);font-size:11px;margin-top:4px">'
+    secAsk += '<div style="color:var(--sub);font-size:11px;margin-top:4px">'
       + 'この時間に入れそうなら OK を押してください。押すまで枠は開きません</div></div>';
   }
 
   // ── 今日の自分の予定（時間軸）──
-  html += '<div class="card"><h3>📅 本日の予定</h3>';
+  let secDay = '<div class="card"><h3>📅 本日の予定</h3>';
   if (!mine.length) {
-    html += '<div class="empty">本日のご予約はありません</div>';
+    secDay += '<div class="empty">本日のご予約はありません</div>';
   } else {
     const dShifts = (shiftQ || []).filter(function(x) { return x.date === todayS; });
-    html += '<div class="tlwrap"><div class="tl">' + tlHeadHtml()
+    secDay += '<div class="tlwrap"><div class="tl">' + tlHeadHtml()
       + '<div class="tlrow"><div class="tlname">' + esc(me) + shiftTagHtml(mySh, codesQ)
       + calAllDayChips(calFor((calQ || []).filter(function(e) { return e.date === todayS; }), me, todayS)) + '</div>'
       + '<div class="tltrack">' + shiftShadeHtml(mySh, codesQ)
@@ -5458,7 +5459,7 @@ async function renderMyPage() {
       + tlBlocksHtml(mine, null, null) + '</div></div></div></div>';
     mine.forEach(function(r) {
       const past = r.booking_start < nowIso;
-      html += '<div class="trow"' + (past ? ' style="opacity:.6"' : '') + '>'
+      secDay += '<div class="trow"' + (past ? ' style="opacity:.6"' : '') + '>'
         + '<span class="d' + (past ? '' : ' future') + '">' + fmtTime(r.booking_start) + '</span>'
         + '<a style="color:var(--accent);text-decoration:none;font-weight:700" href="#/c/'
         + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
@@ -5468,7 +5469,7 @@ async function renderMyPage() {
         + '</div>';
     });
   }
-  html += '</div>';
+  secDay += '</div>';
 
   // ── 自分の担当のお客様で、声をかけたい方 ──
   const longRows = ((longQ && longQ.data) || []);
@@ -5559,17 +5560,17 @@ async function renderMyPage() {
       n: '通算8回以上お越しの方です', b: chipsOf(revMine) });
   }
 
-  html += '<div class="card" style="border-left:5px solid #c9a227"><h3>📋 あなたの声かけリスト</h3>';
+  let secCalls = '<div class="card" style="border-left:5px solid #c9a227"><h3>📋 あなたの声かけリスト</h3>';
   if (!items.length) {
-    html += '<div class="empty">✅ いま声をかける方はいません</div>';
+    secCalls += '<div class="empty">✅ いま声をかける方はいません</div>';
   } else {
     items.forEach(function(x) {
-      html += '<div style="padding:8px 2px;border-bottom:1px solid var(--line)">'
+      secCalls += '<div style="padding:8px 2px;border-bottom:1px solid var(--line)">'
         + '<div style="font-size:13.5px">' + x.i + ' ' + x.t
         + '<span style="color:var(--sub);font-size:11.5px">　' + x.n + '</span></div>' + x.b + '</div>';
     });
   }
-  html += '</div>';
+  secCalls += '</div>';
 
   // ── 店舗の定例ToDo（シートから自動取り込み）──
   // 店長には全部、一般スタッフには自分も担当する分だけ出す
@@ -5593,8 +5594,9 @@ async function renderMyPage() {
     .sort(function(a, b) { return a.left - b.left; });
   const doneList = todos.filter(function(x) { return x.done; });
 
+  let secTodo = '';
   if (todos.length && myStore) {
-    html += '<div class="card" style="border-left:5px solid #5a67a5">'
+    secTodo += '<div class="card" style="border-left:5px solid #5a67a5">'
       + '<h3>🗂 ' + esc(myStore) + ' の定例ToDo'
       + '<small style="font-weight:400;color:var(--sub);font-size:11.5px">　'
       + (soon.length ? 'もうすぐ ' + soon.length + '件' : 'さしあたり期限はありません')
@@ -5620,27 +5622,28 @@ async function renderMyPage() {
         + '</div>';
     }
     if (!soon.length && !always.length) {
-      html += '<div class="empty">いま手をつける項目はありません</div>';
+      secTodo += '<div class="empty">いま手をつける項目はありません</div>';
     }
-    soon.forEach(function(x) { html += todoRow(x, false); });
+    soon.forEach(function(x) { secTodo += todoRow(x, false); });
     if (always.length) {
-      html += '<div class="mhead" style="background:#eef1f7;color:#3b4a7a">随時・定期的に</div>';
-      always.forEach(function(x) { html += todoRow(x, false); });
+      secTodo += '<div class="mhead" style="background:#eef1f7;color:#3b4a7a">随時・定期的に</div>';
+      always.forEach(function(x) { secTodo += todoRow(x, false); });
     }
     if (later.length) {
-      html += '<div class="mhead" style="background:#eef1f7;color:#3b4a7a">先の予定（' + later.length + '件）</div>';
-      later.slice(0, 6).forEach(function(x) { html += todoRow(x, true); });
+      secTodo += '<div class="mhead" style="background:#eef1f7;color:#3b4a7a">先の予定（' + later.length + '件）</div>';
+      later.slice(0, 6).forEach(function(x) { secTodo += todoRow(x, true); });
     }
     if (doneList.length) {
-      html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">✅ 今期ぶん完了: '
+      secTodo += '<div style="color:var(--sub);font-size:11px;margin-top:6px">✅ 今期ぶん完了: '
         + doneList.map(function(x) { return esc(x.t.title); }).join('・') + '</div>';
     }
-    html += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
+    secTodo += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
       + 'Googleスプレッドシートの「店長ToDo」から6時間ごとに自動で読み込んでいます。'
       + '項目を足したり直したりはシート側でどうぞ</div></div>';
   }
 
-  // ── 店長・経営だけ: 店舗全体の今日 ──
+  // ── 店長・経営: 店舗全体の今日（店長はこれが本題なので、いちばん上に置く）──
+  let secStore = '';
   if ((role === 'manager' || role === 'admin') && myStore) {
     const stToday = todayAll.filter(function(r) {
       return (r.store_tag || '') === myStore && r.status === 'accepted';
@@ -5648,23 +5651,67 @@ async function renderMyPage() {
     const guests = stToday.filter(function(r) {
       return !INTERNAL_NAME_RE.test(r.customer_name || '') && !INTERNAL_NAME_RE.test(r.menu || '');
     });
+    const inner = stToday.length - guests.length;
+    const cxToday = todayAll.filter(function(r) {
+      return (r.store_tag || '') === myStore && r.status !== 'accepted';
+    }).length;
     const byS = {};
     guests.forEach(function(r) {
       resStaffs(r).forEach(function(sn) { if (!isRetired(sn)) byS[sn] = (byS[sn] || 0) + 1; });
     });
-    html += '<div class="card" style="border-left:5px solid ' + col + '">'
-      + '<h3>🏬 ' + esc(myStore) + ' の今日（店長向け）</h3>'
+    const dSh = (shiftQ || []).filter(function(x) {
+      if (x.date !== todayS || isRetired(x.staff_name)) return false;
+      const st = x.store || '';
+      return !st || (SHIFT_STORE_FULL[st] || st) === myStore;
+    });
+    const tlSet = {};
+    guests.forEach(function(r) { resStaffs(r).forEach(function(sn) { if (!isRetired(sn)) tlSet[nw(sn)] = sn; }); });
+    dSh.forEach(function(x) { tlSet[nw(x.staff_name)] = x.staff_name; });
+    const tlNames = staffOfStore(myStore, sortStaffs(Object.keys(tlSet).map(function(k) { return tlSet[k]; })));
+
+    secStore += '<div class="card" style="border:2px solid ' + col + '">'
+      + '<h3>🏬 ' + esc(myStore) + ' の今日</h3>'
       + '<div class="chips">'
-      + '<span class="chip">レッスン <b>' + guests.length + '</b>件</span>'
+      + '<span class="chip" style="font-size:13px">レッスン <b>' + guests.length + '</b>件</span>'
+      + (inner ? '<span class="chip">内部予定 ' + inner + '</span>' : '')
+      + (cxToday ? '<span class="chip" style="color:#b3261e">キャンセル ' + cxToday + '</span>' : '')
       + staffOfStore(myStore, sortStaffs(Object.keys(byS))).map(function(sn) {
           return '<span class="chip">' + esc(sn) + ' <b>' + byS[sn] + '</b></span>';
         }).join('')
-      + '</div>'
-      + '<div class="chips" style="margin-top:4px">'
-      + '<a href="#/store/' + encodeURIComponent(myStore) + '">店舗ページを開く</a>'
-      + '<a href="#/tl?mode=day&store=' + encodeURIComponent(myStore) + '">店舗のタイムライン</a>'
+      + '</div>';
+    if (tlNames.length) {
+      const dB = (blkQ || []).filter(function(x) { return x.date === todayS; });
+      const dC = (calQ || []).filter(function(x) { return x.date === todayS; });
+      const dA = (availQ || []).filter(function(x) { return x.date === todayS; });
+      const dS = (stBlkQ || []).filter(function(x) { return x.date === todayS; });
+      secStore += '<div class="tlwrap" style="margin-top:6px"><div class="tl">' + tlHeadHtml();
+      tlNames.forEach(function(sn) {
+        const sh = shiftFor(dSh, sn, todayS);
+        secStore += '<div class="tlrow"><div class="tlname">' + esc(sn) + shiftTagHtml(sh, codesQ)
+          + calAllDayChips(calFor(dC, sn, todayS)) + '</div>'
+          + '<div class="tltrack">' + shiftShadeHtml(sh, codesQ)
+          + storesBlocksHtml(sbFor(dS, sn, todayS))
+          + availBlocksHtml(availFor(dA, sn, todayS, myStore))
+          + tbBlocksHtml(blocksFor(dB, sn, todayS))
+          + calBlocksHtml(calFor(dC, sn, todayS))
+          + tlBlocksHtml(byStaff(stToday, sn), null, null) + '</div></div>';
+      });
+      secStore += '</div></div>';
+    }
+    secStore += '<div class="chips" style="margin-top:6px">'
+      + '<a href="#/store/' + encodeURIComponent(myStore) + '">店舗ページ（今週のトピック・会員名簿）</a>'
+      + '<a href="#/tl?mode=week&staff=*&store=' + encodeURIComponent(myStore) + '">店舗の1週間</a>'
       + '<a href="#/open?store=' + encodeURIComponent(myStore) + '">空き枠をさがす</a>'
+      + '<a href="#/trial/' + encodeURIComponent(myStore) + '">体験の一覧</a>'
       + '</div></div>';
+  }
+
+  // 店長・経営は「店舗のこと」が本題、一般スタッフは「自分のこと」が本題。
+  // どちらも同じ材料だが、上から読む順番を変える（2026-10-11 大地さん要望）
+  if (role === 'manager' || role === 'admin') {
+    html += secStore + secTodo + secAsk + secDay + secCalls;
+  } else {
+    html += secAsk + secDay + secCalls + secTodo;
   }
 
   html += '<div class="chips" style="margin-top:8px">'
