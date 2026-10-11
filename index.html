@@ -5687,16 +5687,19 @@ async function renderMyPage(params) {
           + parseInt(d.slice(8, 10), 10) + '</div>';
         list.forEach(function(it) {
           const x = it.x;
-          const period = todoPeriod(x.rule, d, todayS);
-          const done = doneSet[x.t.id + '|' + myStore + '|' + period];
+          const rec = doneSet[x.t.id + '|' + myStore + '|' + d];   // 記録はその回ごと
+          const skip = rec && rec.status === 'skip';
+          const done = rec && !skip;
           const past = d < todayS;
+          const bg = skip ? '#eceeed' : (done ? '#e3efe8' : (past ? '#f3dede' : '#e8ecf7'));
+          const fg = skip ? '#8c9391' : (done ? '#0c7a3e' : (past ? '#8a2b22' : '#3b4a7a'));
           o += '<div class="tdchip" style="font-size:10.5px;line-height:1.3;margin-top:2px;padding:2px 4px;'
-            + 'border-radius:5px;background:' + (done ? '#e3efe8' : (past ? '#f3dede' : '#e8ecf7'))
-            + ';color:' + (done ? '#0c7a3e' : (past ? '#8a2b22' : '#3b4a7a')) + ';'
-            + (done ? 'text-decoration:line-through;opacity:.75;' : '') + '" '
+            + 'border-radius:5px;background:' + bg + ';color:' + fg + ';'
+            + (rec ? 'text-decoration:line-through;opacity:.75;' : '') + '" '
             + 'title="' + esc(x.t.title + '（' + x.t.when_text + '・' + x.t.owner + '）'
-                            + (it.moved ? ' ※' + it.from + ' から動かしています' : '')) + '">'
-            + (it.moved ? '↷' : '') + esc(String(x.t.title).slice(0, 10)) + '</div>';
+                            + (it.moved ? ' ※' + it.from + ' から動かしています' : '')
+                            + (skip ? ' ※この回はなしにしています' : '')) + '">'
+            + (it.moved ? '↷' : '') + (skip ? '－' : '') + esc(String(x.t.title).slice(0, 10)) + '</div>';
         });
         o += '</td>';
       }
@@ -5713,9 +5716,9 @@ async function renderMyPage(params) {
       o += '<div class="mhead" style="background:#eef1f7;color:#3b4a7a">この月の予定（日付を変えられます）</div>';
       edits.forEach(function(e) {
         const x = e.it.x;
-        const period = todoPeriod(x.rule, e.d, todayS);
-        const done = doneSet[x.t.id + '|' + myStore + '|' + period];
-        o += '<div class="trow">'
+        const rec = doneSet[x.t.id + '|' + myStore + '|' + e.d];
+        const skip = rec && rec.status === 'skip';
+        o += '<div class="trow"' + (rec ? ' style="opacity:.72"' : '') + '>'
           + '<input type="date" class="tdmove" value="' + e.d + '" data-id="' + esc(x.t.id) + '"'
           + ' data-from="' + e.it.from + '" data-ym="' + calYm + '"'
           + ' style="border:1px solid var(--line);border-radius:8px;padding:4px 6px;font-size:12px">'
@@ -5723,17 +5726,24 @@ async function renderMyPage(params) {
           + '<span style="flex:1;font-weight:600">' + esc(x.t.title) + '</span>'
           + '<span style="color:var(--sub);font-size:11px">' + esc(x.t.when_text || '') + '</span>'
           + (e.it.moved ? '<a href="javascript:void(0)" class="tdreset" data-id="' + esc(x.t.id)
-              + '" data-from="' + e.it.from + '" data-ym="' + calYm + '">元に戻す</a>' : '<span></span>')
-          + (done
-              ? '<span style="color:#0c7a3e">✅ ' + esc(done.done_by || '') + '</span>'
-              : '<a href="javascript:void(0)" class="todoDone" data-id="' + esc(x.t.id)
-                + '" data-p="' + esc(period) + '">済みにする</a>')
+              + '" data-from="' + e.it.from + '" data-ym="' + calYm + '">日付を戻す</a>' : '<span></span>')
+          + (rec
+              ? '<span>' + (skip
+                  ? '<span style="color:var(--sub)">－ なし（' + esc(rec.done_by || '') + '）</span>'
+                  : '<span style="color:#0c7a3e">✅ 済み（' + esc(rec.done_by || '') + '）</span>')
+                + ' <a href="javascript:void(0)" class="todoUndo" data-id="' + esc(x.t.id)
+                + '" data-p="' + e.d + '">取り消す</a></span>'
+              : '<span><a href="javascript:void(0)" class="todoDone" data-id="' + esc(x.t.id)
+                + '" data-p="' + e.d + '">済みにする</a>'
+                + ' / <a href="javascript:void(0)" class="todoSkip" data-id="' + esc(x.t.id)
+                + '" data-p="' + e.d + '">なしにする</a></span>')
           + '</div>';
       });
     }
     o += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
       + 'Googleスプレッドシートの「店長ToDo」から6時間ごとに自動で読み込んでいます。'
-      + '日付を変えてもシート本体は変わりません（その月だけの変更として記録します）</div></div>';
+      + '日付を変えてもシート本体は変わりません（その月だけの変更として記録します）。'
+      + '研修が無い週など、その回だけやらないときは「なしにする」を押してください</div></div>';
     return o;
   }
 
@@ -5846,14 +5856,23 @@ async function renderMyPage(params) {
       renderMyPage(params);
     });
   });
-  app.querySelectorAll('.todoDone').forEach(function(b) {
+  function markTodo(b, status, label) {
     b.addEventListener('click', async function() {
       b.textContent = '…';
       const { error } = await sb.from('crm_store_todo_done').upsert({
         todo_id: b.dataset.id, store: myStore, period: b.dataset.p,
-        done_by: me, done_at: new Date().toISOString()
+        status: status, done_by: me, done_at: new Date().toISOString()
       });
-      if (error) { b.textContent = '済みにする'; alert('保存できませんでした: ' + error.message); return; }
+      if (error) { b.textContent = label; alert('保存できませんでした: ' + error.message); return; }
+      renderMyPage(params);
+    });
+  }
+  app.querySelectorAll('.todoDone').forEach(function(b) { markTodo(b, 'done', '済みにする'); });
+  app.querySelectorAll('.todoSkip').forEach(function(b) { markTodo(b, 'skip', 'なしにする'); });
+  app.querySelectorAll('.todoUndo').forEach(function(b) {
+    b.addEventListener('click', async function() {
+      await sb.from('crm_store_todo_done').delete()
+        .eq('todo_id', b.dataset.id).eq('store', myStore).eq('period', b.dataset.p);
       renderMyPage(params);
     });
   });
