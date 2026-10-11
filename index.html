@@ -350,6 +350,7 @@
   <a href="#/subs">月謝</a>
   <a href="#/report">日報</a>
   <a href="#/data">データ</a>
+  <a href="#/open">空き枠</a>
   <a href="#/search">検索</a>
   <button id="pwBtn" title="パスワード変更">🔑</button>
   <button id="logoutBtn">ログアウト</button>
@@ -5202,6 +5203,325 @@ async function renderFinance(params) {
 }
 
 // ── ルーター ──────────────────────────────
+// ── 空き枠さがし（2026-10-11 大地さん要望）─────────────────────────
+// 「平日の18時から2枠つづけて取れる日」を探すための画面。
+// 既存の画面には手を入れず、独立したタブとして足している。
+// 3段階で出す:
+//   🟢 いま予約できる      … STORESで公開中（crm_avail_slots）＝お客様が今すぐ取れる
+//   🟡 シフト内だが未公開  … 出勤しているのに枠が閉じている（開ければ取れる）
+//   🟠 残業すれば可能      … シフトの前後90分以内。本人に打診してOKなら開ける
+const OPEN_SLOT_MIN = 60;      // 1枠＝レッスン50分＋転換10分
+const OPEN_STRETCH  = 90;      // 残業として打診してよい前後の幅（分）
+function hhmm(m) {
+  const h = Math.floor(m / 60), mm = m % 60;
+  return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+}
+function mergeRanges(list) {
+  const a = list.slice().sort(function(x, y) { return x[0] - y[0]; });
+  const out = [];
+  a.forEach(function(r) {
+    const last = out[out.length - 1];
+    if (last && r[0] <= last[1]) { last[1] = Math.max(last[1], r[1]); } else { out.push([r[0], r[1]]); }
+  });
+  return out;
+}
+function subtractRanges(base, cuts) {
+  let out = base.slice();
+  mergeRanges(cuts).forEach(function(c) {
+    const next = [];
+    out.forEach(function(r) {
+      if (c[1] <= r[0] || c[0] >= r[1]) { next.push(r); return; }
+      if (c[0] > r[0]) next.push([r[0], c[0]]);
+      if (c[1] < r[1]) next.push([c[1], r[1]]);
+    });
+    out = next;
+  });
+  return out.filter(function(r) { return r[1] > r[0]; });
+}
+
+async function renderOpenSlots(params) {
+  const _seq = newRender();
+  app.innerHTML = '<div class="empty">読み込み中…</div>';
+  const todayS = jstToday();
+
+  function multi(name) {
+    const v = params.get(name) || '';
+    return v ? v.split(',').filter(Boolean) : [];
+  }
+  function toggled(list, v) {
+    const a = list.slice(), i = a.indexOf(String(v));
+    if (i >= 0) a.splice(i, 1); else a.push(String(v));
+    return a.join(',');
+  }
+  function link(patch) {
+    const q = new URLSearchParams(params.toString());
+    Object.keys(patch).forEach(function(k) {
+      if (patch[k] === '' || patch[k] === null) q.delete(k); else q.set(k, patch[k]);
+    });
+    const s2 = q.toString();
+    return '#/open' + (s2 ? '?' + s2 : '');
+  }
+  const selStores = multi('store');
+  const selDows   = multi('dow');
+  const need      = parseInt(params.get('n') || '1', 10);          // 連続で取りたい枠数
+  const fromH     = parseInt(params.get('from') || '9', 10);       // 開始時刻の下限
+  const toH       = parseInt(params.get('to') || '21', 10);        // 開始時刻の上限
+  const days      = parseInt(params.get('days') || '14', 10);
+  const showKinds = multi('kind');                                  // open / closed / overtime
+
+  const lastDay = addDays(todayS, days);
+  const [availQ, shiftQ, codesQ, resQ, blkQ, calQ, stBlkQ, askQ] = await Promise.all([
+    fetchAvail(todayS, lastDay),
+    fetchShifts(todayS, lastDay),
+    shiftCodes(),
+    fetchRange(todayS, lastDay),
+    fetchBlocks(todayS, lastDay),
+    fetchCalEvents(todayS, lastDay),
+    fetchStoresBlocks(todayS, lastDay),
+    sb.from('crm_slot_asks').select('*').gte('date', todayS).limit(2000),
+  ]);
+  if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
+  if (stale(_seq)) return;
+
+  const asks = {};
+  ((askQ && askQ.data) || []).forEach(function(a) {
+    asks[a.store + '|' + nw(a.staff_name) + '|' + a.date + '|' + a.start_time] = a;
+  });
+
+  // 日付ごとに、スタッフの「出勤している時間」「すでに埋まっている時間」を組み立てる
+  const rows = [];
+  for (let d = todayS; d < lastDay; d = addDays(d, 1)) {
+    const w = dowOfYmd(d);
+    if (selDows.length && selDows.indexOf(String(w)) < 0) continue;
+    const dShifts = (shiftQ || []).filter(function(x) { return x.date === d; });
+    const dRes    = ((resQ && resQ.data) || []).filter(function(r) {
+      return new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }).format(new Date(r.booking_start)) === d
+        && r.status === 'accepted';
+    });
+    const dAvail  = (availQ || []).filter(function(x) { return x.date === d; });
+    const dBlk    = (blkQ || []).filter(function(x) { return x.date === d; });
+    const dCal    = (calQ || []).filter(function(x) { return x.date === d; });
+    const dStBlk  = (stBlkQ || []).filter(function(x) { return x.date === d; });
+
+    // その日に関わる人を集める
+    const people = {};
+    dShifts.forEach(function(x) { if (!isRetired(x.staff_name)) people[nw(x.staff_name)] = x.staff_name; });
+    dAvail.forEach(function(x) { if (!isRetired(x.staff_name)) people[nw(x.staff_name)] = x.staff_name; });
+
+    Object.keys(people).forEach(function(pk) {
+      const sn = people[pk];
+      const sh = shiftFor(dShifts, sn, d);
+      // 店舗は、シフト表の店舗 → その日の空き枠 → その日の予約 の順で決める
+      let store = sh && sh.store ? (SHIFT_STORE_FULL[sh.store] || sh.store) : '';
+      if (!store) {
+        const a0 = dAvail.filter(function(x) { return nw(x.staff_name) === pk; })[0];
+        if (a0 && a0.store) store = a0.store;
+      }
+      if (!store) {
+        const r0 = dRes.filter(function(r) { return resStaffs(r).some(function(n) { return nw(n) === pk; }); })[0];
+        if (r0) store = r0.store_tag || '';
+      }
+      if (!store) return;                                   // 店舗が分からない行は出さない
+      if (selStores.length && selStores.indexOf(store) < 0) return;
+      if (staffOfStore(store, [sn]).length === 0) return;   // その店舗の勤務者でなければ出さない
+      if (sh && sh.kind === 'off') return;                  // 休みの日は打診しない
+
+      // 埋まっている時間（予約・ブロック・会議）
+      const busy = [];
+      dRes.forEach(function(r) {
+        if (!resStaffs(r).some(function(n) { return nw(n) === pk; })) return;
+        const s0 = minsOf(r.booking_start);
+        busy.push([s0, r.booking_end ? minsOf(r.booking_end) : s0 + 50]);
+      });
+      [blocksFor(dBlk, sn, d), sbFor(dStBlk, sn, d), calFor(dCal, sn, d)].forEach(function(list) {
+        list.forEach(function(b) {
+          if (!b.start_time) { busy.push([TL_START, TL_END]); return; }
+          busy.push([hm2m(b.start_time), hm2m(b.end_time || '21:30')]);
+        });
+      });
+
+      // 出勤している時間（シフトコードから。中抜けは2本）
+      const work = [];
+      if (sh && sh.kind === 'work') {
+        const c = (codesQ || {})[sh.code];
+        const st1 = sh.start_time || (c && c.start_time), en1 = sh.end_time || (c && c.end_time);
+        if (st1 && en1) work.push([hm2m(st1), hm2m(en1)]);
+        const st2 = sh.start2 || (c && c.start2), en2 = sh.end2 || (c && c.end2);
+        if (st2 && en2) work.push([hm2m(st2), hm2m(en2)]);
+      }
+      const openNow = dAvail.filter(function(x) { return nw(x.staff_name) === pk; })
+        .map(function(x) { return [hm2m(x.start_time), hm2m(x.end_time)]; });
+
+      // 3種類の空き時間を作る
+      const freeOpen    = mergeRanges(openNow);
+      const freeClosed  = work.length
+        ? subtractRanges(subtractRanges(mergeRanges(work), busy), freeOpen) : [];
+      const stretch = [];
+      work.forEach(function(r) {
+        stretch.push([Math.max(TL_START, r[0] - OPEN_STRETCH), r[0]]);
+        stretch.push([r[1], Math.min(TL_END, r[1] + OPEN_STRETCH)]);
+      });
+      const freeStretch = work.length
+        ? subtractRanges(subtractRanges(subtractRanges(mergeRanges(stretch), busy), freeOpen), mergeRanges(work)) : [];
+
+      [['open', freeOpen], ['closed', freeClosed], ['overtime', freeStretch]].forEach(function(pair) {
+        const kind = pair[0];
+        if (showKinds.length && showKinds.indexOf(kind) < 0) return;
+        pair[1].forEach(function(r) {
+          // 連続で need 枠ぶん取れる開始時刻を、30分きざみで探す
+          for (let s0 = Math.ceil(r[0] / 30) * 30; s0 + need * OPEN_SLOT_MIN <= r[1]; s0 += 30) {
+            const h = Math.floor(s0 / 60);
+            if (h < fromH || h > toH) continue;
+            rows.push({ date: d, dow: w, store: store, staff: sn, kind: kind,
+                        start: s0, end: s0 + need * OPEN_SLOT_MIN,
+                        ask: asks[store + '|' + pk + '|' + d + '|' + hhmm(s0)] });
+            break;                                   // 1つの空き時間につき最も早い開始だけ出す
+          }
+        });
+      });
+    });
+  }
+  rows.sort(function(a, b) {
+    return a.date.localeCompare(b.date) || a.start - b.start || a.store.localeCompare(b.store, 'ja');
+  });
+
+  const KIND = {
+    open:     { t: '🟢 いま予約できる', c: '#0c7a3e', bg: '#dfeee6',
+                why: 'STORESで公開中です。お客様がそのまま予約できます' },
+    closed:   { t: '🟡 シフト内だが未公開', c: '#8a6a22', bg: '#f6efe6',
+                why: '出勤しているのにSTORESで枠が閉じています。開ければ取れます' },
+    overtime: { t: '🟠 残業すれば可能', c: '#b0743a', bg: '#f7ece0',
+                why: 'シフトの前後90分以内です。本人に打診してOKをもらってから開けます' },
+  };
+
+  let html = '<h2>🔍 空き枠さがし<small style="font-weight:400;color:var(--sub);font-size:12px">　'
+    + '今日から' + days + '日ぶん・' + rows.length + '件</small></h2>';
+
+  function chips(label, items, cur, key) {
+    let o = '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:52px">'
+      + label + '</span>';
+    const clear = {}; clear[key] = '';
+    o += '<a href="' + link(clear) + '"' + (!cur.length ? ' class="on"' : '') + '>すべて</a>';
+    items.forEach(function(it) {
+      const q = {}; q[key] = toggled(cur, it.v);
+      o += '<a href="' + link(q) + '"' + (cur.indexOf(String(it.v)) >= 0 ? ' class="on"' : '') + '>' + it.t + '</a>';
+    });
+    return o + '</div>';
+  }
+  function pick(label, items, cur, key) {
+    let o = '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:52px">'
+      + label + '</span>';
+    items.forEach(function(it) {
+      const q = {}; q[key] = it.v;
+      o += '<a href="' + link(q) + '"' + (String(cur) === String(it.v) ? ' class="on"' : '') + '>' + it.t + '</a>';
+    });
+    return o + '</div>';
+  }
+  html += chips('店舗', STORE_ORDER_ALL.map(function(x) { return { v: x, t: esc(x) }; }), selStores, 'store');
+  html += chips('曜日', [1,2,3,4,5,6,0].map(function(w) { return { v: w, t: DOW_LABEL[w] + '曜' }; }), selDows, 'dow');
+  html += '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:52px">まとめて</span>'
+    + '<a href="' + link({ dow: '1,2,3,4,5' }) + '"' + (selDows.join(',') === '1,2,3,4,5' ? ' class="on"' : '') + '>平日だけ</a>'
+    + '<a href="' + link({ dow: '6,0' }) + '"' + (selDows.join(',') === '6,0' ? ' class="on"' : '') + '>土日だけ</a>'
+    + '</div>';
+  html += pick('連続', [1,2,3].map(function(n) { return { v: n, t: n + '枠つづけて' }; }), need, 'n');
+  html += pick('開始', [9,10,11,12,13,14,15,16,17,18,19,20].map(function(h) {
+      return { v: h, t: h + '時〜' }; }), fromH, 'from');
+  html += pick('期間', [7,14,28].map(function(n) { return { v: n, t: '今後' + n + '日' }; }), days, 'days');
+  html += chips('種類', Object.keys(KIND).map(function(k) { return { v: k, t: KIND[k].t }; }), showKinds, 'kind');
+
+  const sum = { open: 0, closed: 0, overtime: 0 };
+  rows.forEach(function(r) { sum[r.kind]++; });
+  html += '<div class="chips" style="margin-top:4px">'
+    + Object.keys(KIND).map(function(k) {
+        return '<span class="chip" style="background:' + KIND[k].bg + ';color:' + KIND[k].c + ';font-weight:700">'
+          + KIND[k].t + ' ' + sum[k] + '</span>';
+      }).join('') + '</div>';
+
+  if (!rows.length) {
+    html += '<div class="empty">この条件で空いている枠はありません。連続枠を減らすか、期間を広げてください</div>';
+  } else {
+    html += '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
+      + '<th>日付</th><th>時間</th><th>店舗</th><th>担当</th><th>区分</th><th>打診</th></tr></thead><tbody>';
+    let curD = '';
+    rows.slice(0, 300).forEach(function(r) {
+      if (r.date !== curD) {
+        curD = r.date;
+        html += '<tr class="grp"><td colspan="6" style="text-align:left;font-weight:800;color:var(--accent)">'
+          + parseInt(r.date.slice(5, 7), 10) + '/' + parseInt(r.date.slice(8, 10), 10)
+          + '(' + DOW_LABEL[r.dow] + ')</td></tr>';
+      }
+      const K = KIND[r.kind];
+      let askCell;
+      const a = r.ask;
+      if (r.kind === 'open') {
+        askCell = '<span style="color:var(--sub);font-size:11px">不要</span>';
+      } else if (!a) {
+        askCell = '<a href="javascript:void(0)" class="askslot" data-store="' + esc(r.store) + '" data-staff="' + esc(r.staff)
+          + '" data-date="' + r.date + '" data-s="' + hhmm(r.start) + '" data-e="' + hhmm(r.end)
+          + '" data-kind="' + r.kind + '">打診する</a>';
+      } else if (a.status === 'asked') {
+        askCell = '<span style="color:#8a6a22">打診中</span>'
+          + ' <a href="javascript:void(0)" class="ansslot" data-id="' + a.id + '" data-v="ok">OK</a>'
+          + ' / <a href="javascript:void(0)" class="ansslot" data-id="' + a.id + '" data-v="ng">NG</a>';
+      } else if (a.status === 'ok') {
+        askCell = '<b style="color:#0c7a3e">OK</b>（' + esc(a.answered_by || '') + '）'
+          + ' <a href="javascript:void(0)" class="ansslot" data-id="' + a.id + '" data-v="opened">開けた</a>';
+      } else if (a.status === 'opened') {
+        askCell = '<span style="color:#0c7a3e">✅ 開けました</span>';
+      } else {
+        askCell = '<span style="color:#b3261e">NG</span>'
+          + ' <a href="javascript:void(0)" class="ansslot" data-id="' + a.id + '" data-v="asked">戻す</a>';
+      }
+      html += '<tr>'
+        + '<td style="text-align:left;white-space:nowrap">' + parseInt(r.date.slice(5, 7), 10) + '/'
+        + parseInt(r.date.slice(8, 10), 10) + '(' + DOW_LABEL[r.dow] + ')</td>'
+        + '<td style="font-weight:700;white-space:nowrap">' + hhmm(r.start) + '〜' + hhmm(r.end) + '</td>'
+        + '<td><span class="badge" style="background:' + storeColor(r.store) + '">' + esc(r.store) + '</span></td>'
+        + '<td>' + esc(r.staff) + '</td>'
+        + '<td style="white-space:nowrap"><span class="pill" style="background:' + K.bg + ';color:' + K.c + '" title="'
+        + esc(K.why) + '">' + K.t + '</span></td>'
+        + '<td style="white-space:nowrap">' + askCell + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    if (rows.length > 300) {
+      html += '<div style="color:var(--sub);font-size:11px;margin-top:4px">'
+        + '多いので先頭300件だけ出しています（全' + rows.length + '件）。条件を絞ってください</div>';
+    }
+  }
+  html += '<div style="color:var(--sub);font-size:11px;margin:8px 2px">'
+    + '1枠＝60分（レッスン50分＋転換10分）で計算しています。'
+    + '🟢はSTORESの公開情報（10分ごと更新）なので確実です。'
+    + '🟡と🟠はシフト表と予約から計算した推定なので、開ける前に必ず本人に確認してください。'
+    + '🟠はシフトの前後90分以内だけを出しています</div>';
+
+  if (stale(_seq)) return;
+  app.innerHTML = html;
+
+  const who = await myStaffName();
+  app.querySelectorAll('.askslot').forEach(function(b) {
+    b.addEventListener('click', async function() {
+      b.textContent = '…';
+      const { error } = await sb.from('crm_slot_asks').upsert({
+        store: b.dataset.store, staff_name: b.dataset.staff, date: b.dataset.date,
+        start_time: b.dataset.s, end_time: b.dataset.e, kind: b.dataset.kind,
+        status: 'asked', asked_by: who || '', asked_at: new Date().toISOString()
+      }, { onConflict: 'store,staff_name,date,start_time' });
+      if (error) { b.textContent = '打診する'; alert('保存できませんでした: ' + error.message); return; }
+      renderOpenSlots(params);
+    });
+  });
+  app.querySelectorAll('.ansslot').forEach(function(b) {
+    b.addEventListener('click', async function() {
+      const v = b.dataset.v;
+      const { error } = await sb.from('crm_slot_asks')
+        .update({ status: v, answered_by: who || '', answered_at: new Date().toISOString() })
+        .eq('id', b.dataset.id);
+      if (error) { alert('保存できませんでした: ' + error.message); return; }
+      renderOpenSlots(params);
+    });
+  });
+}
+
 // ── 店舗ページ（店舗ごとに必要な数字を1画面にまとめる・2026-09-24 大地さん要望）──
 async function renderStore(storeName, params) {
   const _seq = newRender();
@@ -5873,6 +6193,10 @@ async function render() {
     return;
   }
   if (hash.indexOf('#/trial') === 0) { renderTrial(); return; }
+  if (hash.indexOf('#/open') === 0) {
+    renderOpenSlots(new URLSearchParams(hash.split('?')[1] || ''));
+    return;
+  }
   if (hash.indexOf('#/store/') === 0) {
     const sp = hash.split('?')[0].split('/');
     renderStore(decodeURIComponent(sp[2] || ''), new URLSearchParams(hash.split('?')[1] || ''));
