@@ -1191,7 +1191,7 @@ async function renderSearch(q) {
     if (v) { location.hash = '#/search?q=' + encodeURIComponent(v); }
   };
   document.getElementById('sBtn').onclick = go;
-  document.getElementById('sq').addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) go(); });
+  onEnter(document.getElementById('sq'), go);
 
   if (q) {
     const like = '%' + q + '%';
@@ -1219,6 +1219,22 @@ async function renderSearch(q) {
 const TL_START = 540, TL_END = 1290, TL_TOTAL = TL_END - TL_START; // 9:00〜21:30
 const WDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 function nw(s) { return String(s || '').replace(/[\s　]+/g, ''); }
+// Enter で実行する入力欄の共通処理。
+// 日本語入力の「変換を確定するEnter」で走ってしまうのを防ぐ。
+// isComposing だけでは取りこぼす環境があるため、変換が終わった直後の
+// 250ミリ秒も見送る（2026-10-11 大地さん指摘）
+function onEnter(el, fn) {
+  if (!el) return;
+  let composing = false, endedAt = 0;
+  el.addEventListener('compositionstart', function() { composing = true; });
+  el.addEventListener('compositionend', function() { composing = false; endedAt = Date.now(); });
+  el.addEventListener('keydown', function(e) {
+    if (e.key !== 'Enter') return;
+    if (composing || e.isComposing || e.keyCode === 229) return;
+    if (Date.now() - endedAt < 250) return;      // 変換を確定した直後のEnter
+    fn(e);
+  });
+}
 function wdow(dstr) { return new Date(dstr + 'T12:00:00+09:00').getUTCDay(); }
 function fmtMD(dstr) { return parseInt(dstr.slice(5, 7), 10) + '/' + parseInt(dstr.slice(8, 10), 10) + '(' + WDAYS[wdow(dstr)] + ')'; }
 function weekStart(dstr) { return addDays(dstr, -((wdow(dstr) + 6) % 7)); }
@@ -2556,7 +2572,7 @@ async function renderSubs(params) {
   app.innerHTML = html;
   const who = await myStaffName();
   app.querySelectorAll('.subnote').forEach(function(inp) {
-    inp.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) inp.blur(); });
+    onEnter(inp, function() { inp.blur(); });
     inp.addEventListener('change', async function() {
       const { error } = await sb.from('crm_subs_notes').upsert({
         merchant_id: inp.dataset.mid, customer_id: parseInt(inp.dataset.cid, 10),
@@ -3213,8 +3229,7 @@ async function renderStats(params) {
     });
   });
   app.querySelectorAll('.mgradd').forEach(function(inp) {
-    inp.addEventListener('keydown', async function(e) {
-      if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+    onEnter(inp, async function() {
       const v = inp.value.trim();
       if (!v) return;
       await sb.from('crm_manager_tasks').insert({ store: inp.dataset.store, task: v });
@@ -5611,7 +5626,7 @@ async function renderOpenSlots(params) {
   }
   if (wish) {
     document.getElementById('wishGo').onclick = runWish;
-    wish.addEventListener('keydown', function(e) { if (e.key === 'Enter') runWish(); });
+    onEnter(wish, runWish);
   }
 
   const who = await myStaffName();
