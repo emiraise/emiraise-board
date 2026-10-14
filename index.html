@@ -573,7 +573,7 @@ async function renderDay(dateStr) {
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const from = d + 'T00:00:00+09:00';
   const to = addDays(d, 1) + 'T00:00:00+09:00';
-  const { data: dataRaw, error } = await sb.from('crm_reservations').select('*')
+  const { data: dataRaw, error } = await sb.from('crm_reservations').select(RESV_COLS)
     .gte('booking_start', from).lt('booking_start', to)
     .in('status', ['accepted', 'canceled_by_host', 'canceled_by_customer']).order('booking_start');
   if (error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(error.message) + '</div>'; return; }
@@ -1279,6 +1279,10 @@ function onEnter(el, fn) {
 function wdow(dstr) { return new Date(dstr + 'T12:00:00+09:00').getUTCDay(); }
 function fmtMD(dstr) { return parseInt(dstr.slice(5, 7), 10) + '/' + parseInt(dstr.slice(8, 10), 10) + '(' + WDAYS[wdow(dstr)] + ')'; }
 function weekStart(dstr) { return addDays(dstr, -((wdow(dstr) + 6) % 7)); }
+// 予約で画面が実際に使う列。select('*') だと使わない大きな列まで付いてくる
+const RESV_COLS = 'reservation_id,merchant_id,store_tag,booking_start,booking_end,status,'
+  + 'customer_id,customer_name,staff_names,menu,price,latest_changed_at,booking_made,'
+  + 'status_changed_at,canceled_at';
 function minsOf(iso) {
   const parts = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: TZ }).format(new Date(iso)).split(':');
   return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
@@ -1337,7 +1341,9 @@ async function fetchRangeRaw(fromDate, toDateExcl) {
   // （8月後半の予約が切り捨てられ月謝タブが「予約ゼロ」誤表示になった障害の対策・2026-07-27）
   let all = [];
   for (let page = 0; page < 10; page++) {
-    const { data, error } = await sb.from('crm_reservations').select('*')
+    // 使っていない列（payment・questionnaires・merchant_name）を外す。
+    // これだけで送る量が半分近くになる（2026-10-12 表示を速くするため）
+    const { data, error } = await sb.from('crm_reservations').select(RESV_COLS)
       .gte('booking_start', fromDate + 'T00:00:00+09:00')
       .lt('booking_start', toDateExcl + 'T00:00:00+09:00')
       .eq('status', 'accepted')
@@ -1393,10 +1399,26 @@ let RENDER_SEQ = 0;
 function newRender() { return ++RENDER_SEQ; }
 function stale(seq) { return seq !== RENDER_SEQ; }
 
+// 取り直す間隔は、元のデータが更新される間隔に合わせる。
+// 短すぎると同じものを何度も取りに行き、長すぎると古いものを見せてしまう
+const CACHE_TTL = [
+  [/^t\|crm_shift_codes/, 30 * 60000],   // シフトの記号。ほぼ変わらない
+  [/^sh\|/,               10 * 60000],   // シフト表。取り込みは6時間おき
+  [/^t\|crm_customers/,   10 * 60000],   // 顧客マスタ。同期は6時間おき
+  [/^t\|v_customer_karte/, 10 * 60000],
+  [/^t\|crm_store_todos/, 10 * 60000],   // 店長ToDo。取り込みは6時間おき
+  [/^t\|v_trial_outcomes/, 5 * 60000],
+  [/^t\|crm_lead_source_names/, 5 * 60000],
+  [/^av\|/,                5 * 60000],   // STORESの空き枠。更新は10分おき
+];
+function ttlOf(key) {
+  for (let i = 0; i < CACHE_TTL.length; i++) if (CACHE_TTL[i][0].test(key)) return CACHE_TTL[i][1];
+  return 120000;                           // 予約など、よく変わるもの（同期は5分おき）
+}
 function cached(key, fn) {
   const hit = _qCache[key];
   const now = Date.now();
-  if (hit && now - hit.t < 60000) return hit.p;
+  if (hit && now - hit.t < ttlOf(key)) return hit.p;
   const p = fn().then(function(r) {
     // 失敗をキャッシュすると60秒間ずっとエラーのままになるので、消す
     if (r && r.error) delete _qCache[key];
@@ -1552,9 +1574,11 @@ function shiftShadeHtml(sh, codes) {
 }
 // STORES管理画面から回収した実ブロック（理由メモ付き・2026-08-07〜）
 async function fetchStoresBlocks(fromDate, toDateExcl) {
-  const { data } = await sb.from('crm_stores_blocks').select('*')
-    .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
-  return data || [];
+  return cached('stb|' + fromDate + '|' + toDateExcl, async function() {
+    const { data } = await sb.from('crm_stores_blocks').select('*')
+      .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
+    return data || [];
+  });
 }
 function sbFor(list, staffName, dateStr) {
   return (list || []).filter(function(x) { return nw(x.staff_name) === nw(staffName) && x.date === dateStr; });
@@ -1672,9 +1696,11 @@ function stBlockedEstHtml(sh, codes, availRanges, bookings, manualBlocks, dateSt
 
 // STORES公開予約ページの「実質予約可能な枠」（10分ごと自動更新）
 async function fetchAvail(fromDate, toDateExcl) {
-  const { data } = await sb.from('crm_avail_slots').select('*')
-    .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
-  return data || [];
+  return cached('av|' + fromDate + '|' + toDateExcl, async function() {
+    const { data } = await sb.from('crm_avail_slots').select('*')
+      .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
+    return data || [];
+  });
 }
 function availFor(av, staffName, dateStr, store) {
   av = (av || []).filter(function(x) { return !store || !x.store || x.store === store; });
@@ -1696,9 +1722,11 @@ function availBlocksHtml(ranges) {
 
 // Googleカレンダーの予定ミラー（MTG・研修・考える時間など詳細タイトル付き）
 async function fetchCalEvents(fromDate, toDateExcl) {
-  const { data } = await sb.from('crm_cal_events').select('*')
-    .gte('date', fromDate).lt('date', toDateExcl).limit(1000);
-  return data || [];
+  return cached('cal|' + fromDate + '|' + toDateExcl, async function() {
+    const { data } = await sb.from('crm_cal_events').select('*')
+      .gte('date', fromDate).lt('date', toDateExcl).limit(1000);
+    return data || [];
+  });
 }
 function calFor(evts, staffName, dateStr) {
   return evts.filter(function(x) { return nw(x.staff_name) === nw(staffName) && x.date === dateStr; });
@@ -1748,9 +1776,11 @@ function shiftStaffs(shifts, dateStr) {
 
 // ── 休み・ブロック枠（ボード側管理。STORES APIはシフト/ブロックを提供しない） ──
 async function fetchBlocks(fromDate, toDateExcl) {
-  const { data } = await sb.from('crm_time_blocks').select('*')
-    .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
-  return data || [];
+  return cached('blk|' + fromDate + '|' + toDateExcl, async function() {
+    const { data } = await sb.from('crm_time_blocks').select('*')
+      .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
+    return data || [];
+  });
 }
 function hm2m(s) { const p = String(s || '').split(':'); return parseInt(p[0], 10) * 60 + (parseInt(p[1], 10) || 0); }
 function tbBlocksHtml(blocks) {
@@ -3313,6 +3343,18 @@ function karteFirstDate(memo) {
 const MID_TARGET = 8;
 // 中間カウンセリングの対象者（6・7・8回目）を割り出す。
 // ヒアリングタブと店舗ページで同じ判定を使うため、ここに1つだけ置く。
+// カルテの要約（v_customer_karte）を顧客に貼り付ける。
+// 本文を丸ごと受け取らずに、回数と初回日だけを使うため
+function attachKarte(custs, karteQ) {
+  const by = {};
+  ((karteQ && karteQ.data) || []).forEach(function(k) {
+    by[custKey(k.merchant_id, k.customer_id)] = k;
+  });
+  return (custs || []).map(function(c) {
+    const k = by[custKey(c.merchant_id, c.customer_id)];
+    return k ? Object.assign({}, c, { karte_n: k.karte_n, karte_first: k.karte_first }) : c;
+  });
+}
 function midGroups(rows, custs, midMap, storeSel) {
   const nowIso = new Date().toISOString();
   // 顧客ごとに来店を時系列に並べ、「何回目がいつか」を持たせる
@@ -3336,8 +3378,9 @@ function midGroups(rows, custs, midMap, storeSel) {
     agg[nm].mid = cu.merchant_id;
     agg[nm].cid = cu.customer_id;
     agg[nm].subs = cu.subscriptions || [];
-    agg[nm].karteN = karteSessionCount(cu.memo);
-    agg[nm].firstDate = karteFirstDate(cu.memo)
+    // memo 本文は重いので送っていない。要約（karte_n / karte_first）を使う
+    agg[nm].karteN = (cu.karte_n !== undefined) ? (cu.karte_n || 0) : karteSessionCount(cu.memo);
+    agg[nm].firstDate = (cu.karte_first !== undefined ? cu.karte_first : karteFirstDate(cu.memo))
       || (cu.first_reserved_at ? String(cu.first_reserved_at).slice(0, 10) : null);
   });
 
@@ -3388,14 +3431,15 @@ async function renderMidCounseling(params) {
   const _seq = newRender();
   app.innerHTML = '<div class="empty">読み込み中…</div>';
   const storeSel = (params && params.get('store')) || '';
-  const [resQ, custQ, midQ] = await Promise.all([
+  const [resQ, custQ, midQ, karteQ] = await Promise.all([
     fetchRange(addDays(jstToday(), -400), addDays(jstToday(), 92)),
-    fetchTable('crm_customers', 'merchant_id,customer_id,name,merchant_name,subscriptions,memo,first_reserved_at'),
+    fetchTable('crm_customers', 'merchant_id,customer_id,name,merchant_name,subscriptions,first_reserved_at'),
     sb.from('crm_mid_counseling').select('*').limit(2000),
+    fetchTable('v_customer_karte', 'merchant_id,customer_id,karte_n,karte_first', ['merchant_id', 'customer_id']),
   ]);
   if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
   const rows = resQ.data || [];
-  const custs = custQ.data || [];
+  const custs = attachKarte(custQ.data || [], karteQ);
   const midMap = {};
   ((midQ && midQ.data) || []).forEach(function(m) { midMap[custKey(m.merchant_id, m.customer_id)] = m; });
   const nowIso = new Date().toISOString();
@@ -3549,8 +3593,7 @@ function leadSourceOf(r, cust, manual, isPortalRow, byName, pKey) {
     if (c.channel) return { src: normSource(c.channel), auto: true };
     const pf = sourceFromProfile(c);
     if (pf) return { src: normSource(pf), auto: true };
-    const m = String(c.memo || '');
-    const head = m.slice(0, 400);
+    const head = String(c.memo_head !== undefined ? c.memo_head : (c.memo || '')).slice(0, 400);
     if (/紹介|知人|友人|同級生|ご家族/.test(head)) return { src: '紹介', auto: true };
     if (c.line_linked) return { src: 'LINE', auto: true };
   }
@@ -3578,7 +3621,7 @@ async function renderTrial() {
   const today = jstToday();
   const from = addDays(today, -120);
   const to = addDays(today, 92);
-  const { data, error } = await sb.from('crm_reservations').select('*')
+  const { data, error } = await sb.from('crm_reservations').select(RESV_COLS)
     .gte('booking_start', from + 'T00:00:00+09:00').lt('booking_start', to + 'T00:00:00+09:00')
     .in('status', ['accepted', 'canceled_by_host', 'canceled_by_customer'])
     .or('menu.ilike.%初回%,menu.ilike.%体験%,menu.ilike.%キャンペーン%,menu.ilike.%かんざし%,customer_name.ilike.%新規%,customer_name.ilike.%体験%')
@@ -3599,7 +3642,7 @@ async function renderTrial() {
   });
   const [custQ, srcQ, nameQ, outQ, syncQ] = await Promise.all([
     needIds.length
-      ? sb.from('crm_customers').select('merchant_id,customer_id,name,channel,line_linked,profile_fields,memo')
+      ? sb.from('v_customer_lite').select('merchant_id,customer_id,name,channel,line_linked,profile_fields,memo_head')
           .in('customer_id', needIds.slice(0, 900))
       : Promise.resolve({ data: [], error: null }),
     sb.from('crm_lead_sources').select('merchant_id,customer_id,source').limit(2000),
@@ -5411,7 +5454,7 @@ async function renderMyPage(params) {
 
   const wkEnd = addDays(todayS, 7);
   const [dayQ, shiftQ, codesQ, askQ, availQ, blkQ, calQ, stBlkQ, custQ, longQ, outQ, midQ, revQ, futQ,
-         todoQ, doneQ, moveQ] = await Promise.all([
+         todoQ, doneQ, moveQ, karteQ] = await Promise.all([
       fetchRange(todayS, addDays(todayS, 1)),
       fetchShifts(todayS, wkEnd),
       shiftCodes(),
@@ -5420,7 +5463,7 @@ async function renderMyPage(params) {
       fetchBlocks(todayS, addDays(todayS, 1)),
       fetchCalEvents(todayS, addDays(todayS, 1)),
       fetchStoresBlocks(todayS, addDays(todayS, 1)),
-      fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,name,subscriptions,memo,first_reserved_at'),
+      fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,name,subscriptions,first_reserved_at'),
       fetchRange(addDays(todayS, -400), addDays(todayS, 92)),
       fetchTable('v_trial_outcomes', 'name_key,trial_date,next_date,contract_date,member_date,'
                  + 'sheet_won,sheet_lost,had_visit,had_cancel,won,manual_outcome', ['name_key']),
@@ -5430,11 +5473,12 @@ async function renderMyPage(params) {
       sb.from('crm_store_todos').select('*').eq('active', true).limit(300),
       sb.from('crm_store_todo_done').select('*').limit(3000),
       sb.from('crm_store_todo_moves').select('*').limit(2000),
+      fetchTable('v_customer_karte', 'merchant_id,customer_id,karte_n,karte_first', ['merchant_id', 'customer_id']),
     ]);
   if (dayQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(dayQ.error.message) + '</div>'; return; }
   if (stale(_seq)) return;
 
-  const custs = (custQ && custQ.data) || [];
+  const custs = attachKarte((custQ && custQ.data) || [], karteQ);
   const nameOf = {}, storeOfCust = {};
   custs.forEach(function(c) {
     nameOf[custKey(c.merchant_id, c.customer_id)] = nameKey(c.name);
@@ -6439,11 +6483,11 @@ async function renderStore(storeName, params) {
   const nowIso = new Date().toISOString();
   const y = parseInt(ym.slice(0, 4), 10), mo = parseInt(ym.slice(5, 7), 10);
 
-  const [monQ, custQ, trialQ, outQ, nameQ, futQ, longQ, midQ, askQ, shiftQ, codesQ, monShiftQ,
+  const [monQ, custQ, trialQ, outQ, nameQ, futQ, longQ, midQ, askQ, karteQ, shiftQ, codesQ, monShiftQ,
          blkQ, calQ, availQ, stBlkQ] = await Promise.all([
     fetchRange(first, nextFirst),
-    fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,name,kana,subscriptions,ticket_books,memo,first_reserved_at'),
-    sb.from('crm_reservations').select('*')
+    fetchTable('crm_customers', 'merchant_id,customer_id,merchant_name,name,kana,subscriptions,ticket_books,first_reserved_at'),
+    sb.from('crm_reservations').select(RESV_COLS)
       .gte('booking_start', addDays(todayS, -90) + 'T00:00:00+09:00')
       .lt('booking_start', addDays(todayS, 92) + 'T00:00:00+09:00')
       .eq('store_tag', storeName).limit(1000),
@@ -6454,6 +6498,7 @@ async function renderStore(storeName, params) {
     fetchRange(addDays(todayS, -400), addDays(todayS, 92)),
     sb.from('crm_mid_counseling').select('*').limit(2000),
     sb.from('crm_review_asks').select('name_key,asked_at,asked_by').limit(2000),
+    fetchTable('v_customer_karte', 'merchant_id,customer_id,karte_n,karte_first', ['merchant_id', 'customer_id']),
     fetchShifts(todayS, addDays(todayS, 1)),
     shiftCodes(),
     fetchShifts(first, nextFirst),
@@ -6465,7 +6510,7 @@ async function renderStore(storeName, params) {
   if (monQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(monQ.error.message) + '</div>'; return; }
   if (stale(_seq)) return;
 
-  const custs = (custQ && custQ.data) || [];
+  const custs = attachKarte((custQ && custQ.data) || [], karteQ);
   const nameOf = {}, storeOfCust = {};
   custs.forEach(function(c) {
     nameOf[custKey(c.merchant_id, c.customer_id)] = nameKey(c.name);
