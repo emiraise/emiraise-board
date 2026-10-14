@@ -798,6 +798,15 @@ async function renderCustomer(mid, cid) {
 
   // 基本情報
   html += '<div class="card c-basic"><h2>' + esc(name) + (c && c.kana ? ' <small style="color:var(--sub);font-weight:400">' + esc(c.kana) + '</small>' : '') + '</h2>';
+  // STORESの顧客ID。向こうの管理画面で探すときに要るので、押すとコピーできるようにする
+  html += '<div class="chips" style="margin:2px 0 6px">'
+    + '<span class="chip" style="font-variant-numeric:tabular-nums">STORES顧客ID '
+    + '<b id="cidTxt">' + esc(String(cid)) + '</b>'
+    + ' <a href="javascript:void(0)" id="cidCopy" title="クリップボードにコピー" style="text-decoration:none">📋</a></span>'
+    + (c && c.membership_number
+        ? '<span class="chip">会員番号 <b>' + esc(c.membership_number) + '</b></span>' : '')
+    + '<a href="https://coubic.com/dashboard" target="_blank" rel="noopener">STORESの管理画面を開く</a>'
+    + '</div>';
 
   // 自動アラート（来店履歴と回数券から判定）＋ラベルの要約
   const pastArr = hist.filter(function(r) { return r.booking_start < nowIso && r.status === 'accepted'; });
@@ -838,6 +847,7 @@ async function renderCustomer(mid, cid) {
     if (c.phone) html += '<dt>電話</dt><dd><a href="tel:' + esc(c.phone) + '">' + esc(c.phone) + '</a></dd>';
     if (c.email) html += '<dt>メール</dt><dd>' + esc(c.email) + '</dd>';
     if (c.membership_number) html += '<dt>会員番号</dt><dd>' + esc(c.membership_number) + '</dd>';
+    html += '<dt>STORES顧客ID</dt><dd style="font-variant-numeric:tabular-nums">' + esc(String(cid)) + '</dd>';
     if (c.birthday) html += '<dt>生年月日</dt><dd>' + esc(c.birthday) + '</dd>';
     if (c.channel) html += '<dt>集客経路</dt><dd>' + esc(c.channel) + '</dd>';
     if (c.first_reserved_at) html += '<dt>初回予約</dt><dd>' + fmtDate(c.first_reserved_at) + '</dd>';
@@ -1064,6 +1074,25 @@ async function renderCustomer(mid, cid) {
 
   if (stale(_seq)) return;
   app.innerHTML = html;
+
+  // STORES顧客IDのコピー
+  const cidCopy = document.getElementById('cidCopy');
+  if (cidCopy) {
+    cidCopy.onclick = async function() {
+      try {
+        await navigator.clipboard.writeText(String(cid));
+        cidCopy.textContent = '✅';
+      } catch (e) {
+        // クリップボードが使えない環境では、選択状態にして手でコピーしてもらう
+        const r = document.createRange();
+        r.selectNodeContents(document.getElementById('cidTxt'));
+        const sel = window.getSelection();
+        sel.removeAllRanges(); sel.addRange(r);
+        cidCopy.textContent = '選択しました';
+      }
+      setTimeout(function() { cidCopy.textContent = '📋'; }, 1500);
+    };
+  }
 
   // ラベル編集の配線
   const bodySel = bodyNow.slice();
