@@ -3687,6 +3687,7 @@ async function renderTrial() {
   const selSrc = decodeURIComponent((hPath.split('/')[3] || ''));
   const selWhen = hQuery.get('when') || '';   // 時期の絞り込み（これから／今月／先月…）
   const selRes  = hQuery.get('res')  || '';   // 結果の絞り込み（成約／未成約／キャンセル／振替）
+  const selStaff = hQuery.get('staff') || '';  // 担当で絞る
   const selSort = hQuery.get('sort') || '';   // 並び（既定=体験日順／made=予約が入った順）
   const selView = hQuery.get('view') || '';   // 表示（既定=一覧／store=店舗別に並べる）
   // 同じチップをもう一度押すと解除。店舗と経路はパス、それ以外はクエリで持つ
@@ -3818,7 +3819,7 @@ async function renderTrial() {
       + chipT('when', 'week', '今週 ' + wk + '件', '', '')
       + (po ? chipT('when', 'kanzashi', 'うち🔖かんざし 今月' + po + '件', '',
                     '今月の体験' + tm + '件のうち、かんざし経由のご予約') : '')
-      + '</div>' + outcomeChips(subset) + srcChips(subset);
+      + '</div>' + outcomeChips(subset) + staffChips(subset) + srcChips(subset);
   }
   // 月ごとの内訳。同じ方・同じ日・同じ店舗の重複取り込み（STORESとワンモア、
   // 「新規　◯◯」表記など）は1件に寄せてから数える
@@ -3964,6 +3965,54 @@ async function renderTrial() {
         + '<span style="color:var(--sub)">（継続率測定シートの「成約」欄に◯／Xを入れると確定します。次のご予約や契約が入れば自動で成約になります）</span></div>'
         + '<div class="chips">' + needOut.map(function(x) { return '<span class="chip">' + x + '</span>'; }).join('') + '</div>';
     }
+    return o + '</div>';
+  }
+  // 担当別の成約率。体験に入った人ごとに、来店・成約・キャンセルを数える。
+  // 1人の体験に2人ついた場合は両方に数える（どちらも接客しているため）
+  function staffChips(subset) {
+    const by = {};
+    const seen = {};
+    subset.forEach(function(r) {
+      const k = personKey(r) || nameKey(r.customer_name);
+      resStaffs(r).forEach(function(sn) {
+        if (isRetired(sn) || sn === '担当未設定') return;
+        const o = (by[sn] = by[sn] || { visited: 0, won: 0, cx: 0 });
+        const tag = sn + '|' + k;
+        if (seen[tag]) return;                 // 同じ方を二重に数えない
+        seen[tag] = true;
+        if (isCx(r)) { o.cx++; return; }
+        if (dOf(r) >= jstToday()) return;      // これからの方はまだ判定できない
+        o.visited++;
+        if (isWon(outcome[k] || outcome[nameKey(r.customer_name)] || {})) o.won++;
+      });
+    });
+    const names = sortStaffs(Object.keys(by).filter(function(n) { return by[n].visited > 0; }));
+    if (!names.length) return '';
+    const base = '#/trial' + (selStore ? '/' + encodeURIComponent(selStore) : (selSrc ? '/' : ''))
+      + (selSrc ? '/' + encodeURIComponent(selSrc) : '');
+    function hrefFor(v) {
+      const q2 = new URLSearchParams(hQuery.toString());
+      if (!v || q2.get('staff') === v) q2.delete('staff'); else q2.set('staff', v);
+      const qs = q2.toString();
+      return base + (qs ? '?' + qs : '');
+    }
+    let o = '<div class="chips" style="margin-top:2px">'
+      + '<span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px">担当別の成約率</span>'
+      + '<a href="' + hrefFor('') + '"' + (!selStaff ? ' class="on"' : '') + '>全員</a>';
+    names.forEach(function(sn) {
+      const x = by[sn];
+      const rate = x.visited ? Math.round(x.won * 100 / x.visited) : 0;
+      // 件数が少ないうちは率が跳ねるので、5件未満は控えめに出す
+      const thin = x.visited < 5;
+      const col = thin ? '#8c9b93' : (rate >= 70 ? '#0c7a3e' : (rate >= 50 ? '#b0743a' : '#b3261e'));
+      o += '<a href="' + hrefFor(sn) + '"' + (selStaff === sn ? ' class="on"' : '')
+        + ' style="border-left:4px solid ' + col + '"'
+        + ' title="' + esc(sn + '：来店' + x.visited + '名のうち成約' + x.won + '名'
+            + (x.cx ? '／キャンセル' + x.cx + '件' : '')
+            + (thin ? '（まだ件数が少ないので参考値です）' : '')) + '">'
+        + esc(sn) + ' <b style="color:' + col + '">' + rate + '%</b>'
+        + '<span style="color:var(--sub);font-size:10.5px">（' + x.won + '/' + x.visited + '）</span></a>';
+    });
     return o + '</div>';
   }
   function srcChips(subset) {
@@ -4172,14 +4221,18 @@ async function renderTrial() {
   let subset = selSrc ? byStore.filter(function(r) { return srcOf(r).src === selSrc; }) : byStore;
   if (selWhen) subset = subset.filter(inWhen);
   if (selRes)  subset = subset.filter(inRes);
+  if (selStaff) subset = subset.filter(function(r) {
+    return resStaffs(r).some(function(n) { return nw(n) === nw(selStaff); });
+  });
   html += kanzashiHtml(byStore);
   const WHEN_LABEL = { fut: 'これからの体験', cur: '今月', next: '翌月', last: '先月',
                        week: '今週', kanzashi: 'かんざし（今月）' };
   const RES_LABEL  = { won: '成約', lost: '未成約', cx: 'キャンセル', resched: '振替' };
-  if (selWhen || selRes || selSrc) {
+  if (selWhen || selRes || selSrc || selStaff) {
     const names = [];
     if (selWhen) names.push(WHEN_LABEL[selWhen] || selWhen);
     if (selRes)  names.push(RES_LABEL[selRes] || selRes);
+    if (selStaff) names.push('担当 ' + selStaff);
     if (selSrc)  names.push(selSrc);
     const clearBase = '#/trial' + (selStore ? '/' + encodeURIComponent(selStore) : '');
     html += '<div class="mhead" style="background:#eef3f1;display:flex;align-items:center;gap:10px">'
