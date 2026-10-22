@@ -6990,10 +6990,47 @@ async function renderStore(storeName, params) {
       });
       html += '<td style="font-weight:700">' + work + '日</td></tr>';
     });
+    // 日ごとの出勤人数。薄い日がひと目で分かるようにする（2026-10-22 大地さん要望）
+    const headCount = {};
+    shDays.forEach(function(d) {
+      headCount[d] = shNames.filter(function(sn) {
+        const x = (shBy[nw(sn)] || {})[d];
+        return x && x.kind === 'work';
+      }).length;
+    });
+    const maxHead = shDays.reduce(function(a, d) { return Math.max(a, headCount[d]); }, 0);
+    html += '<tr style="background:#eef3f1"><td style="text-align:left;white-space:nowrap;font-weight:800">出勤人数</td>';
+    shDays.forEach(function(d) {
+      const n = headCount[d];
+      const w = dowOfYmd(d);
+      // 0人＝休業、1人＝手が足りない日として色を変える
+      const bg = n === 0 ? '#eceeed' : (n === 1 ? '#fbe0d4' : (n >= maxHead && maxHead > 1 ? '#dff0e4' : 'transparent'));
+      const fg = n === 0 ? '#aab1ae' : (n === 1 ? '#8a3312' : '#15543d');
+      html += '<td style="padding:4px 2px;font-size:12px;font-weight:800;background:' + bg
+        + ';color:' + fg + '" title="' + esc(parseInt(d.slice(5, 7), 10) + '/' + parseInt(d.slice(8, 10), 10)
+          + '(' + DOW_LABEL[w] + ') ' + (n ? n + '人出勤' : '出勤者なし')) + '">'
+        + (n || '－') + '</td>';
+    });
+    const totalDays = shDays.filter(function(d) { return headCount[d] > 0; }).length;
+    const avg = totalDays ? (shDays.reduce(function(a, d) { return a + headCount[d]; }, 0) / totalDays) : 0;
+    html += '<td style="font-weight:700">平均' + (Math.round(avg * 10) / 10) + '人</td></tr>';
     html += '</tbody></table></div>';
+    const thin = shDays.filter(function(d) { return headCount[d] === 1; });
+    const none = shDays.filter(function(d) { return headCount[d] === 0; });
+    if (thin.length || none.length) {
+      html += '<div class="chips" style="margin-top:4px">'
+        + (thin.length ? '<span class="chip" style="background:#fbe0d4;color:#8a3312">1人だけの日 '
+            + thin.length + '日（' + thin.slice(0, 10).map(function(d) {
+                return parseInt(d.slice(8, 10), 10) + '日';
+              }).join('・') + (thin.length > 10 ? ' ほか' : '') + '）</span>' : '')
+        + (none.length ? '<span class="chip">出勤者なし ' + none.length + '日</span>' : '')
+        + '</div>';
+    }
     html += '<div style="color:var(--sub);font-size:11px;margin:4px 2px">'
       + 'Googleドライブのシフト表から6時間ごとに自動で取り込んでいます（手で入れる必要はありません）。'
       + '緑＝出勤（記号はシフトコード）／赤＝休み／青＝研修・会議・出張。'
+      + '一番下の行がその日の出勤人数で、<span style="color:#8a3312;font-weight:700">1人だけの日は橙</span>、'
+      + '出勤者がいない日は「－」です。'
       + '記号の時間は<a href="#/tl?store=' + encodeURIComponent(storeName) + '">タイムラインタブ</a>で確認できます</div>';
   }
 
