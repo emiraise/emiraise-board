@@ -1508,10 +1508,22 @@ function ticketAlerts(ticketBooks) {
 }
 
 // ── シフト（Googleドライブのシフト表から取り込み済みデータ） ──
+// 実際のシフトから学習する店舗別の勤務者。固定名簿 STORE_STAFF が古くなると
+// 「本当は出ているのに店舗ページに出ない」人が生まれるため、実データで補う（2026-11-03）
+const SHIFT_ROSTER = {};
+function learnRoster(shifts) {
+  (shifts || []).forEach(function(s) {
+    if (!s || s.kind !== 'work' || !s.store || !s.staff_name) return;
+    const full = SHIFT_STORE_FULL[s.store] || s.store;
+    if (!SHIFT_ROSTER[full]) SHIFT_ROSTER[full] = {};
+    SHIFT_ROSTER[full][nw(s.staff_name)] = true;
+  });
+}
 async function fetchShifts(fromDate, toDateExcl) {
   return cached('sh|' + fromDate + '|' + toDateExcl, async function() {
     const { data } = await sb.from('crm_shifts').select('*')
       .gte('date', fromDate).lt('date', toDateExcl).limit(2000);
+    learnRoster(data || []);
     return data || [];
   });
 }
@@ -1799,8 +1811,9 @@ const STORE_STAFF = {
 function staffOfStore(storeName, list) {
   const allow = STORE_STAFF[storeName];
   if (!allow) return list;
+  const learned = SHIFT_ROSTER[storeName] || {};
   return list.filter(function(n) {
-    return allow.some(function(x) { return nw(x) === nw(n); });
+    return learned[nw(n)] || allow.some(function(x) { return nw(x) === nw(n); });
   });
 }
 function isRetired(n) {
