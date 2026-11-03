@@ -1258,7 +1258,8 @@ async function renderSearch(q) {
 }
 
 // ── タイムライン（日/週/月・ワンモア管理画面風） ─────────
-const TL_START = 540, TL_END = 1290, TL_TOTAL = TL_END - TL_START; // 9:00〜21:30
+const TL_START = 480, TL_END = 1290, TL_TOTAL = TL_END - TL_START; // 8:00〜21:30
+// 9:00始まりだと A シフト（08:30〜）と 8時台のブロックが画面外で消えていた（2026-11-03）
 const WDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 function nw(s) { return String(s || '').replace(/[\s　]+/g, ''); }
 // Enter で実行する入力欄の共通処理。
