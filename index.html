@@ -299,6 +299,7 @@
   .tbblk.calb { background:repeating-linear-gradient(45deg, #dfe6f4 0 6px, #d4ddf1 6px 12px); color:#40518a; border:none; cursor:default; font-weight:600; }
   .adchip { display:block; background:#dfe6f4; color:#40518a; border-radius:8px; font-size:10px; padding:2px 6px; margin-top:3px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:130px; }
   .tbblk.calbk { background:#5f8d7a; color:#fff; border:none; cursor:default; font-weight:700; font-size:11px; box-shadow:0 1px 3px rgba(0,0,0,.2); z-index:1; }
+  .avslot.unpub { background:rgba(46,160,110,.05); border:1.5px dotted #a9c9ba; color:#6f9a86; font-weight:700; }
   .avslot { position:absolute; top:3px; bottom:3px; z-index:0; background:rgba(46,160,110,.14); border:1.5px dashed #2ea06e; border-radius:8px; color:#1f6f54; font-size:10px; font-weight:800; padding:1px 4px; overflow:hidden; }
 
   /* ── ニューモーフィズムUI（機能そのまま・見た目の上書き） ── */
@@ -1604,7 +1605,7 @@ function storesBlocksHtml(items) {
 }
 
 // 空き枠APIが無い店舗（天王寺=ワンモア）用: 予約・ブロック・シフト外を除いた時間を「空」として出す
-function omhAvailHtml(sh, codes, bookings, blocks, dateStr) {
+function omhAvailHtml(sh, codes, bookings, blocks, dateStr, unpub) {
   if (!sh || sh.kind !== 'work') return '';
   let src = null;
   if (sh.start_time) src = sh;
@@ -1640,60 +1641,17 @@ function omhAvailHtml(sh, codes, bookings, blocks, dateStr) {
       const width = (f[1] - f[0]) / TL_TOTAL * 100;
       const t1 = String(Math.floor(f[0] / 60)).padStart(2, '0') + ':' + String(f[0] % 60).padStart(2, '0');
       const t2 = String(Math.floor(f[1] / 60)).padStart(2, '0') + ':' + String(f[1] % 60).padStart(2, '0');
-      h += '<div class="avslot" style="left:' + left + '%;width:' + width + '%" title="'
-        + esc('予約を入れられる時間 ' + t1 + '-' + t2 + '（予約・ブロックのない枠）') + '">空</div>';
+      h += '<div class="avslot' + (unpub ? ' unpub' : '') + '" style="left:' + left + '%;width:' + width + '%" title="'
+        + esc(unpub
+            ? '空き ' + t1 + '-' + t2 + '（予約もブロックも無い時間。STORESにはまだ公開されていません）'
+            : '予約を入れられる時間 ' + t1 + '-' + t2 + '（予約・ブロックのない枠）') + '">空</div>';
     });
   });
   return h;
 }
 
-// STORESブロックの推定表示: シフト中なのに「予約も空き枠も手動ブロックも無い」時間 ≒ STORES側でブロック中
-// （STORESのブロックはAPI非公開のため、公開空き枠からの逆算で可視化する・2026-08-07大地要望）
-function stBlockedEstHtml(sh, codes, availRanges, bookings, manualBlocks, dateStr, todayStr) {
-  // 空き枠データの対象期間（今日〜約4週間先）だけで推定する
-  if (!dateStr || dateStr < todayStr || dateStr > addDays(todayStr, 27)) return '';
-  if (!sh || sh.kind !== 'work') return '';
-  let src = null;
-  if (sh.start_time) src = sh;
-  else if (sh.code && codes[sh.code] && codes[sh.code].start_time) src = codes[sh.code];
-  if (!src) return '';
-  let segs = [[Math.max(hm2m(src.start_time), TL_START), Math.min(hm2m(src.end_time), TL_END)]];
-  if (src.start2) segs.push([Math.max(hm2m(src.start2), TL_START), Math.min(hm2m(src.end2), TL_END)]);
-  // 差し引く区間: 空き枠・予約・手動ブロック
-  const cuts = [];
-  (availRanges || []).forEach(function(x) { cuts.push([hm2m(x.start_time), hm2m(x.end_time)]); });
-  (bookings || []).forEach(function(r) {
-    const st2 = fmtTime(r.booking_start), en2 = fmtTime(r.booking_end);
-    if (st2 && en2) cuts.push([hm2m(st2), hm2m(en2) || (hm2m(st2) + 60)]);
-  });
-  (manualBlocks || []).forEach(function(b) {
-    if (b.start_time) cuts.push([hm2m(b.start_time), hm2m(b.end_time || '21:00')]);
-    else cuts.push([TL_START, TL_END]);
-  });
-  cuts.sort(function(a, b) { return a[0] - b[0]; });
-  let h = '';
-  segs.forEach(function(sg) {
-    let cur = sg[0];
-    const pieces = [];
-    cuts.forEach(function(c) {
-      const cs = Math.max(c[0], sg[0]), ce = Math.min(c[1], sg[1]);
-      if (ce <= cs) return;
-      if (cs > cur) pieces.push([cur, cs]);
-      cur = Math.max(cur, ce);
-    });
-    if (cur < sg[1]) pieces.push([cur, sg[1]]);
-    pieces.forEach(function(pz) {
-      if (pz[1] - pz[0] < 30) return;  // 30分未満の隙間は無視
-      const left = (pz[0] - TL_START) / TL_TOTAL * 100;
-      const width = (pz[1] - pz[0]) / TL_TOTAL * 100;
-      const t1 = String(Math.floor(pz[0] / 60)).padStart(2, '0') + ':' + String(pz[0] % 60).padStart(2, '0');
-      const t2 = String(Math.floor(pz[1] / 60)).padStart(2, '0') + ':' + String(pz[1] % 60).padStart(2, '0');
-      h += '<div class="stblk" style="left:' + left + '%;width:' + width + '%" title="' + esc('🚫 STORES側でブロック中とみられる時間（' + t1 + '-' + t2 + '・空き枠なし/予約なし）') + '">🚫</div>';
-    });
-  });
-  return h;
-}
-
+// （STORESブロックの推定表示は 2026-11-03 に廃止。公開枠が無い＝ブロックとは限らず、
+//   全店で空き時間が斜線に化けたため。いまは unpubFreeHtml が薄い「空」で出す）
 // STORES公開予約ページの「実質予約可能な枠」（10分ごと自動更新）
 async function fetchAvail(fromDate, toDateExcl) {
   return cached('av|' + fromDate + '|' + toDateExcl, async function() {
@@ -1706,29 +1664,15 @@ function availFor(av, staffName, dateStr, store) {
   av = (av || []).filter(function(x) { return !store || !x.store || x.store === store; });
   return av.filter(function(x) { return nw(x.staff_name) === nw(staffName) && x.date === dateStr; });
 }
-// その店舗のその日に「公開枠データそのものが届いているか」。
-// 届いていない日に🚫推定をかけると、空き時間が全部ブロック扱いになって
-// 「空」が消える（本店 2026-11-03 の実例・大地さん指摘）。推定はこれが真の日だけ。
-function storeHasAvail(av, storeFull, dateStr) {
-  if (!storeFull) return false;
-  return (av || []).some(function(x) { return x.date === dateStr && x.store === storeFull; });
-}
-// その人がその日どの店に立っているか（シフト優先・無ければ予約の店舗タグ）
-function tlStoreOf(sh, rows, st) {
-  const s = (sh && sh.store) ? sh.store : '';
-  if (s) return SHIFT_STORE_FULL[s] || s;
-  const r = byStaff(rows, st)[0];
-  return (r && r.store_tag) || '';
-}
-// 🚫推定を出してよい日か（公開枠データが届いている日だけ）
-function tlEstOK(av, sh, rows, st, dateStr) {
-  return storeHasAvail(av, tlStoreOf(sh, rows, st), dateStr);
-}
-// 公開枠データが届いていない日は「予約もブロックも無い時間」を空として出す。
-// （本店・天王寺など。届いている日は availBlocksHtml 側が本物の空を出すので何もしない）
-function freeFallbackHtml(av, sh, codes, rows, blocks, stBlocks, st, dateStr) {
-  if (tlEstOK(av, sh, rows, st, dateStr)) return '';
-  return omhAvailHtml(sh, codes, byStaff(rows, st), tlCuts(blocks, stBlocks, st, dateStr), dateStr);
+// 公開枠を除いた「まだ公開していない空き時間」。予約・ブロック・シフト外・公開枠を
+// すべて差し引いた残りを薄い「空」で出す。斜線での推定ブロック表示は
+// 全店で誤判定になったため廃止（2026-11-03 大地さん指摘）。
+function unpubFreeHtml(av, sh, codes, rows, blocks, stBlocks, st, dateStr) {
+  const cuts = tlCuts(blocks, stBlocks, st, dateStr).concat(
+    availFor(av, st, dateStr).map(function(x) {
+      return { start_time: x.start_time, end_time: x.end_time };
+    }));
+  return omhAvailHtml(sh, codes, byStaff(rows, st), cuts, dateStr, true);
 }
 // 空き計算から差し引く区間（手動ブロック＋STORESの実ブロック）
 function tlCuts(dayBlocks, dayStBlocks, st, dateStr) {
@@ -2142,9 +2086,7 @@ async function renderTimeline(params) {
         const sh = shiftFor(dayShifts, st, date);
         html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + shiftTagHtml(sh, codes) + calAllDayChips(calFor(dayCal, st, date)) + '</div><div class="tltrack" data-staff="' + esc(st) + '" data-date="' + date + '">'
           + shiftShadeHtml(sh, codes)
-          + (tlEstOK(dayAvail, sh, rows, st, date)
-             ? stBlockedEstHtml(sh, codes, availFor(dayAvail, st, date, storeSel), byStaff(rows, st), tlCuts(dayBlocks, dayStBlocks, st, date), date, jstToday())
-             : omhAvailHtml(sh, codes, byStaff(rows, st), tlCuts(dayBlocks, dayStBlocks, st, date), date))
+          + unpubFreeHtml(dayAvail, sh, codes, rows, dayBlocks, dayStBlocks, st, date)
           + availBlocksHtml(availFor(dayAvail, st, date, storeSel))
           + storesBlocksHtml(sbFor(dayStBlocks, st, date))
           + tbBlocksHtml(blocksFor(dayBlocks, st, date))
@@ -2152,7 +2094,7 @@ async function renderTimeline(params) {
           + tlBlocksHtml(byStaff(rows, st), dayChecks, dayMeta) + '</div></div>';
       });
       html += '</div></div>';
-      html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px"><span style="color:#1f6f54;font-weight:700">緑点線「空」＝今お客様が予約できる枠（STORES公開情報・10分ごと更新）</span>｜斜線＝シフト外・休み・会議（シフト表/カレンダーから自動）｜グレー＝固定ブロック（休憩・休み）｜<span style="color:#805e12;font-weight:700">琥珀↔＝動かせるブロック</span>。<span style="color:#5a6570;font-weight:700">🚫濃いグレー＝STORESのブロック（理由メモ付き・管理画面から取得）</span>｜🚫薄い模様＝ブロックとみられる時間（推定）。<span style="color:#1f6f54">公開枠データが届いていない日は推定を出さず、予約もブロックも無い時間を「空」で表示します。</span></div>';
+      html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px"><span style="color:#1f6f54;font-weight:700">緑点線「空」＝今お客様が予約できる枠（STORES公開情報・10分ごと更新）</span>｜斜線＝シフト外・休み・会議（シフト表/カレンダーから自動）｜グレー＝固定ブロック（休憩・休み）｜<span style="color:#805e12;font-weight:700">琥珀↔＝動かせるブロック</span>。<span style="color:#5a6570;font-weight:700">🚫濃いグレー＝STORESのブロック（理由メモ付き・管理画面から取得）</span>｜<span style="color:#6f9a86;font-weight:700">薄い点線「空」＝予約もブロックも無い時間（STORESには未公開＝お客様はまだ予約できません）</span></div>';
     }
     if (stale(_seq)) return;
     app.innerHTML = html;
@@ -2263,7 +2205,7 @@ async function renderTimeline(params) {
           const sh = shiftFor(shifts, st, d);
           html += '<div class="tlrow"><div class="tlname">' + esc(st) + shiftTagHtml(sh, codes) + calAllDayChips(calFor(calEvts, st, d)) + '</div><div class="tltrack" data-staff="' + esc(st) + '" data-date="' + d + '">'
             + shiftShadeHtml(sh, codes)
-            + freeFallbackHtml(avail, sh, codes, dayRows, blocks, stBlocksAll, st, d)
+            + unpubFreeHtml(avail, sh, codes, dayRows, blocks, stBlocksAll, st, d)
             + availBlocksHtml(availFor(avail, st, d))
             + storesBlocksHtml(sbFor(stBlocksAll, st, d))
             + tbBlocksHtml(blocksFor(blocks, st, d))
@@ -2277,7 +2219,7 @@ async function renderTimeline(params) {
           + '<div class="tlname' + dayNameCls(d, today) + '">' + fmtMD(d) + shiftTagHtml(sh, codes) + calAllDayChips(calFor(calEvts, staff, d)) + '</div>'
           + '<div class="tltrack" data-staff="' + esc(staff) + '" data-date="' + d + '">'
           + shiftShadeHtml(sh, codes)
-          + freeFallbackHtml(avail, sh, codes, dayRows, blocks, stBlocksAll, staff, d)
+          + unpubFreeHtml(avail, sh, codes, dayRows, blocks, stBlocksAll, staff, d)
           + availBlocksHtml(availFor(avail, staff, d))
           + storesBlocksHtml(sbFor(stBlocksAll, staff, d))
           + tbBlocksHtml(blocksFor(blocks, staff, d))
@@ -6881,7 +6823,7 @@ async function renderStore(storeName, params) {
         + calAllDayChips(calFor(dayCal, sn, todayS)) + '</div>'
         + '<div class="tltrack">' + shiftShadeHtml(sh, codesQ)
         + storesBlocksHtml(sbFor(dayStBlk, sn, todayS))
-        + freeFallbackHtml(dayAvail, sh, codesQ, todayOk, dayBlocks, dayStBlk, sn, todayS)
+        + unpubFreeHtml(dayAvail, sh, codesQ, todayOk, dayBlocks, dayStBlk, sn, todayS)
         + availBlocksHtml(availFor(dayAvail, sn, todayS, storeName))
         + tbBlocksHtml(blocksFor(dayBlocks, sn, todayS))
         + calBlocksHtml(calFor(dayCal, sn, todayS))
