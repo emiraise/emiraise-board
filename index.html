@@ -6163,6 +6163,65 @@ function parseSlotWish(text) {
   return q;
 }
 
+// 公開中の空き枠を店舗・スタッフ別に数える（#/open の先頭に常設・2026-11-04 大地さん要望）
+// 「28日では枠があるのに直近3日が0」を一目で分かるようにするのが狙い
+function openSummaryHtml(av, todayS) {
+  const d3 = addDays(todayS, 2), d7 = addDays(todayS, 6), d14 = addDays(todayS, 13);
+  const byStore = {};
+  (av || []).forEach(function(x) {
+    if (!x.date || x.date < todayS) return;
+    const mins = hm2m(x.end_time) - hm2m(x.start_time);
+    if (!(mins > 0)) return;
+    const st = x.store || '（店舗不明）';
+    const nm = x.staff_name || '（担当なし）';
+    if (!byStore[st]) byStore[st] = {};
+    if (!byStore[st][nm]) byStore[st][nm] = { a: 0, b: 0, c: 0, d: 0 };
+    const t = byStore[st][nm];
+    if (x.date <= d3)  t.a += mins;
+    if (x.date <= d7)  t.b += mins;
+    if (x.date <= d14) t.c += mins;
+    t.d += mins;
+  });
+  const stores = Object.keys(byStore).sort();
+  if (!stores.length) return '';
+  const slot = function(m) { return Math.floor(m / OPEN_SLOT_MIN); };
+  const warn = function(v) {
+    if (v === 0) return ' style="color:#b3261e;font-weight:800"';
+    return v <= 2 ? ' style="color:#805e12;font-weight:800"' : '';
+  };
+  const g = { a: 0, b: 0, c: 0, d: 0 };
+  let h = '<h3 style="margin:10px 0 4px">📊 いま公開している空き枠（1枠＝' + OPEN_SLOT_MIN + '分）</h3>'
+    + '<div class="tlwrap" style="padding:0"><table class="rep"><thead><tr>'
+    + '<th style="text-align:left">店舗</th><th style="text-align:left">スタッフ</th>'
+    + '<th>3日以内</th><th>7日以内</th><th>14日以内</th><th>28日合計</th></tr></thead><tbody>';
+  stores.forEach(function(st) {
+    const names = sortStaffs(Object.keys(byStore[st]));
+    const sub = { a: 0, b: 0, c: 0, d: 0 };
+    names.forEach(function(nm) {
+      const t = byStore[st][nm];
+      ['a', 'b', 'c', 'd'].forEach(function(k) { sub[k] += t[k]; g[k] += t[k]; });
+      h += '<tr><td style="text-align:left;color:var(--sub)">' + esc(st) + '</td>'
+        + '<td style="text-align:left">' + esc(nm) + '</td>'
+        + '<td' + warn(slot(t.a)) + '>' + slot(t.a) + '</td>'
+        + '<td' + warn(slot(t.b)) + '>' + slot(t.b) + '</td>'
+        + '<td>' + slot(t.c) + '</td>'
+        + '<td style="font-weight:700">' + slot(t.d) + '</td></tr>';
+    });
+    h += '<tr style="background:#eef3f1;font-weight:700">'
+      + '<td style="text-align:left" colspan="2">' + esc(st) + '　小計</td>'
+      + '<td' + warn(slot(sub.a)) + '>' + slot(sub.a) + '</td>'
+      + '<td' + warn(slot(sub.b)) + '>' + slot(sub.b) + '</td>'
+      + '<td>' + slot(sub.c) + '</td><td>' + slot(sub.d) + '</td></tr>';
+  });
+  h += '<tr style="background:#dfe8e4;font-weight:800"><td style="text-align:left" colspan="2">全店合計</td>'
+    + '<td>' + slot(g.a) + '</td><td>' + slot(g.b) + '</td>'
+    + '<td>' + slot(g.c) + '</td><td>' + slot(g.d) + '</td></tr>';
+  return h + '</tbody></table></div>'
+    + '<div style="color:var(--sub);font-size:11px;margin:2px 2px 12px">'
+    + 'STORESで公開中＝お客様がいま予約できる枠（10分おきに自動更新）。'
+    + '<b style="color:#b3261e">赤=0枠</b>・<b style="color:#805e12">黄=2枠以下</b>は、その期間お客様を受けられません。'
+    + '28日合計が多いのに3日以内が少ない人は、枠が後ろに溜まっています</div>';
+}
 async function renderOpenSlots(params) {
   const _seq = newRender();
   app.innerHTML = '<div class="empty">読み込み中…</div>';
@@ -6203,7 +6262,7 @@ async function renderOpenSlots(params) {
     fromDay = first > todayS ? first : todayS;
     lastDay = addDays(addDays(base + '-28', 7).slice(0, 7) + '-01', 0);   // 翌月1日＝その月の末日の次
   }
-  const [availQ, shiftQ, codesQ, resQ, blkQ, calQ, stBlkQ, askQ] = await Promise.all([
+  const [availQ, shiftQ, codesQ, resQ, blkQ, calQ, stBlkQ, askQ, avail28Q] = await Promise.all([
     fetchAvail(fromDay, lastDay),
     fetchShifts(fromDay, lastDay),
     shiftCodes(),
@@ -6212,6 +6271,7 @@ async function renderOpenSlots(params) {
     fetchCalEvents(fromDay, lastDay),
     fetchStoresBlocks(fromDay, lastDay),
     sb.from('crm_slot_asks').select('*').gte('date', fromDay).limit(2000),
+    fetchAvail(todayS, addDays(todayS, 28)),   // 先頭の集計は絞り込みに左右されない固定28日
   ]);
   if (resQ.error) { app.innerHTML = '<div class="empty">読み込みエラー: ' + esc(resQ.error.message) + '</div>'; return; }
   if (stale(_seq)) return;
@@ -6349,6 +6409,7 @@ async function renderOpenSlots(params) {
     : '今日から' + days + '日ぶん';
   let html = '<h2>🔍 空き枠さがし<small style="font-weight:400;color:var(--sub);font-size:12px">　'
     + spanLabel + '・' + rows.length + '件</small></h2>';
+  html += openSummaryHtml(avail28Q, todayS);
 
   function chips(label, items, cur, key) {
     let o = '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:52px">'
