@@ -6163,6 +6163,14 @@ function parseSlotWish(text) {
   return q;
 }
 
+// 1つの公開区間を「1枠=OPEN_SLOT_MIN分」に刻んで、各枠の開始時刻（分）を返す。
+// 端数（例 10:00-12:30 の最後の30分）は枠にならないので捨てる
+function slotStarts(x) {
+  const out = [];
+  const e = hm2m(x.end_time);
+  for (let m = hm2m(x.start_time); m + OPEN_SLOT_MIN <= e; m += OPEN_SLOT_MIN) out.push(m);
+  return out;
+}
 // 公開中の空き枠を店舗・スタッフ別に数える（#/open の先頭に常設・2026-11-04 大地さん要望）
 // 「28日では枠があるのに直近3日が0」を一目で分かるようにするのが狙い
 function openSummaryHtml(av, todayS) {
@@ -6170,8 +6178,8 @@ function openSummaryHtml(av, todayS) {
   const byStore = {};
   (av || []).forEach(function(x) {
     if (!x.date || x.date < todayS) return;
-    const mins = hm2m(x.end_time) - hm2m(x.start_time);
-    if (!(mins > 0)) return;
+    const mins = slotStarts(x).length;
+    if (!mins) return;
     const st = x.store || '（店舗不明）';
     const nm = x.staff_name || '（担当なし）';
     if (!byStore[st]) byStore[st] = {};
@@ -6184,7 +6192,7 @@ function openSummaryHtml(av, todayS) {
   });
   const stores = Object.keys(byStore).sort();
   if (!stores.length) return '';
-  const slot = function(m) { return Math.floor(m / OPEN_SLOT_MIN); };
+  const slot = function(m) { return m; };
   const warn = function(v) {
     if (v === 0) return ' style="color:#b3261e;font-weight:800"';
     return v <= 2 ? ' style="color:#805e12;font-weight:800"' : '';
@@ -6221,6 +6229,108 @@ function openSummaryHtml(av, todayS) {
     + 'STORESで公開中＝お客様がいま予約できる枠（10分おきに自動更新）。'
     + '<b style="color:#b3261e">赤=0枠</b>・<b style="color:#805e12">黄=2枠以下</b>は、その期間お客様を受けられません。'
     + '28日合計が多いのに3日以内が少ない人は、枠が後ろに溜まっています</div>';
+}
+// 新規がどの曜日・どの時間帯に入れるかを、曜日×時間帯のマトリクスと
+// 月曜始まりのカレンダーで見せる（2026-11-04 大地さん要望）
+function openWhenHtml(av, todayS, selStores) {
+  const last = addDays(todayS, 27);
+  const rows = (av || []).filter(function(x) {
+    if (!x.date || x.date < todayS || x.date > last) return false;
+    if (selStores && selStores.length && selStores.indexOf(x.store) < 0) return false;
+    return true;
+  });
+  // 曜日(0=日)×時間帯 と、日付ごとの時間帯別枠数
+  const mat = {}, perDay = {}, dowTot = [0, 0, 0, 0, 0, 0, 0];
+  BANDS.forEach(function(b) { mat[b.key] = [0, 0, 0, 0, 0, 0, 0]; });
+  rows.forEach(function(x) {
+    const w = dowOfYmd(x.date);
+    slotStarts(x).forEach(function(m) {
+      const bk = bandOf(Math.floor(m / 60));
+      if (!bk) return;
+      mat[bk][w] += 1;
+      dowTot[w] += 1;
+      if (!perDay[x.date]) perDay[x.date] = { t: 0 };
+      perDay[x.date][bk] = (perDay[x.date][bk] || 0) + 1;
+      perDay[x.date].t += 1;
+    });
+  });
+  const ORDER = [1, 2, 3, 4, 5, 6, 0];   // 月→日
+  const all = [];
+  BANDS.forEach(function(b) { ORDER.forEach(function(w) { all.push(mat[b.key][w]); }); });
+  const mx = Math.max.apply(null, all.concat([1]));
+  const cell = function(v) {
+    if (!v) return 'background:#f6f4f0;color:#c4bfb6';
+    const a = 0.12 + 0.68 * (v / mx);
+    return 'background:rgba(46,160,110,' + a.toFixed(2) + ');color:' + (a > 0.5 ? '#fff' : '#1f6f54') + ';font-weight:800';
+  };
+  let h = '<h3 style="margin:14px 0 4px">🗓 新規が入れる曜日・時間帯（今日から28日・1枠＝' + OPEN_SLOT_MIN + '分）</h3>';
+  h += '<div class="tlwrap" style="padding:0"><table class="rep" style="min-width:420px"><thead><tr>'
+    + '<th style="text-align:left">時間帯</th>';
+  ORDER.forEach(function(w) {
+    h += '<th style="color:' + (w === 0 ? '#b3261e' : (w === 6 ? '#2a5fa5' : 'inherit')) + '">' + DOW_LABEL[w] + '</th>';
+  });
+  h += '<th>計</th></tr></thead><tbody>';
+  BANDS.forEach(function(b) {
+    let rt = 0;
+    h += '<tr><td style="text-align:left;white-space:nowrap">' + esc(b.label)
+      + ' <small style="color:var(--sub);font-weight:400">' + b.range + '時</small></td>';
+    ORDER.forEach(function(w) {
+      const v = mat[b.key][w]; rt += v;
+      h += '<td style="' + cell(v) + '">' + (v || '-') + '</td>';
+    });
+    h += '<td style="font-weight:700">' + rt + '</td></tr>';
+  });
+  h += '<tr style="background:#eef3f1;font-weight:800"><td style="text-align:left">曜日計</td>';
+  let gt = 0;
+  ORDER.forEach(function(w) { gt += dowTot[w]; h += '<td>' + dowTot[w] + '</td>'; });
+  h += '<td>' + gt + '</td></tr></tbody></table></div>';
+  h += '<div style="color:var(--sub);font-size:11px;margin:2px 2px 10px">'
+    + '色が濃いほど枠が多い曜日・時間帯。<b>薄い／「-」のマスは、その曜日のその時間に新規を受けられません</b>。'
+    + '広告やLPで案内する時間帯は、色の濃いマスに寄せると予約が取れます</div>';
+
+  // ── 月曜始まりカレンダー ──
+  const wd0 = dowOfYmd(todayS);
+  const start = addDays(todayS, -((wd0 + 6) % 7));   // 今週の月曜
+  h += '<h3 style="margin:14px 0 4px">📅 日別の空き枠（月曜始まり）</h3>';
+  h += '<div class="tlwrap" style="padding:0"><table class="rep" style="min-width:560px;table-layout:fixed"><thead><tr>';
+  ORDER.forEach(function(w) {
+    h += '<th style="color:' + (w === 0 ? '#b3261e' : (w === 6 ? '#2a5fa5' : 'inherit')) + '">' + DOW_LABEL[w] + '</th>';
+  });
+  h += '</tr></thead><tbody>';
+  for (let wk = 0; wk < 5; wk++) {
+    const w0 = addDays(start, wk * 7);
+    if (w0 > last) break;
+    h += '<tr>';
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(w0, i);
+      const past = d < todayS, far = d > last;
+      const p = perDay[d];
+      if (past || far) {
+        h += '<td style="background:#f6f4f0;color:#cfcac1;vertical-align:top;height:58px">'
+          + parseInt(d.slice(8), 10) + '</td>';
+        continue;
+      }
+      const tot = p ? p.t : 0;
+      const bg = tot === 0 ? '#fdeceb' : (tot <= 2 ? '#fdf4e0' : '#edf7f2');
+      let detail = '';
+      BANDS.forEach(function(b) {
+        if (p && p[b.key]) detail += '<span style="display:inline-block;margin:1px 2px 0 0;font-size:9.5px;'
+          + 'background:#fff;border-radius:6px;padding:0 3px;color:#1f6f54;font-weight:700">'
+          + esc(b.label) + p[b.key] + '</span>';
+      });
+      h += '<td style="background:' + bg + ';vertical-align:top;height:58px;text-align:left;padding:3px 4px">'
+        + '<div style="font-size:11px;color:var(--sub)">' + parseInt(d.slice(5, 7), 10) + '/' + parseInt(d.slice(8), 10)
+        + (d === todayS ? ' <b style="color:var(--accent)">今日</b>' : '') + '</div>'
+        + '<div style="font-size:15px;font-weight:800;color:' + (tot === 0 ? '#b3261e' : '#1f6f54') + '">' + tot + '枠</div>'
+        + '<div>' + (detail || '<span style="font-size:9.5px;color:#c4bfb6">—</span>') + '</div></td>';
+    }
+    h += '</tr>';
+  }
+  h += '</tbody></table></div>';
+  h += '<div style="color:var(--sub);font-size:11px;margin:2px 2px 12px">'
+    + '<b style="color:#b3261e">赤い日＝1枠も公開していません</b>。黄＝2枠以下。'
+    + '上の店舗チップで絞り込むと、その店舗だけの表になります</div>';
+  return h;
 }
 async function renderOpenSlots(params) {
   const _seq = newRender();
@@ -6410,6 +6520,7 @@ async function renderOpenSlots(params) {
   let html = '<h2>🔍 空き枠さがし<small style="font-weight:400;color:var(--sub);font-size:12px">　'
     + spanLabel + '・' + rows.length + '件</small></h2>';
   html += openSummaryHtml(avail28Q, todayS);
+  html += openWhenHtml(avail28Q, todayS, selStores);
 
   function chips(label, items, cur, key) {
     let o = '<div class="chips"><span style="font-size:11px;color:var(--sub);align-self:center;margin-right:2px;min-width:52px">'
