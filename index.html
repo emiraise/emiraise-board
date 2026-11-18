@@ -6355,7 +6355,8 @@ function ctrlPanelHtml(trial, past, recent, todayS, selStores) {
     + 'どこを閉じるかは<b>③需給比</b>で決め、閉じすぎは<b>④体験1件あたりの枠数</b>で気づく。</div>';
 
   h += '<table class="tbl"><thead><tr><th>店舗</th>'
-    + '<th>①枠／日<br><span class="muted">目安 ' + CTRL_SLOTS_PER_DAY_MIN + '〜' + CTRL_SLOTS_PER_DAY_MAX + '</span></th>'
+    + '<th>①枠／公開日<br><span class="muted">目安 ' + CTRL_SLOTS_PER_DAY_MIN + '〜' + CTRL_SLOTS_PER_DAY_MAX + '</span></th>'
+    + '<th>公開日<br><span class="muted">28日中</span></th>'
     + '<th>②要分割の日<br><span class="muted">連続2h超</span></th>'
     + '<th>③閉じる候補<br><span class="muted">需給比が最小</span></th>'
     + '<th>④体験1件あたり<br><span class="muted">目標 ' + CTRL_PER_TRIAL_TGT + '枠以下</span></th>'
@@ -6363,7 +6364,9 @@ function ctrlPanelHtml(trial, past, recent, todayS, selStores) {
 
   stores.forEach(function(st) {
     const o = sup[st];
-    const perDay = Math.round(o.slots / 28 * 10) / 10;
+    // 「枠が1つもない日」は満席に見えるので分母に入れない。28日で割ると
+    // 公開している日のスカスカ具合がぼやける（福井: 28日割り4.7 → 公開日割り7.3）
+    const perDay = o.days ? Math.round(o.slots / o.days * 10) / 10 : 0;
     const d = dem[st] || { total: 0, band: {} };
     // ③ 需給比が最も小さい帯＝いちばん過剰に見せている帯
     let worst = '', worstR = null;
@@ -6381,6 +6384,7 @@ function ctrlPanelHtml(trial, past, recent, todayS, selStores) {
       : '<b style="color:#0c7a3e">🟢 適正</b>';
     h += '<tr><td><b>' + esc(st) + '</b></td>'
       + '<td' + (over || under ? ' style="color:#c0392b;font-weight:700"' : '') + '>' + perDay + '</td>'
+      + '<td class="muted">' + o.days + '日</td>'
       + '<td' + (o.longDays ? ' style="color:#c0392b;font-weight:700"' : '') + '>' + o.longDays + '日'
       + (o.maxRun ? ' <span class="muted">最長' + (Math.round(o.maxRun / 60 * 10) / 10) + 'h</span>' : '') + '</td>'
       + '<td>' + (worst ? esc(worst) + ' <span class="muted">' + (Math.round(worstR * 100) / 100) + '</span>' : '—') + '</td>'
@@ -6388,7 +6392,7 @@ function ctrlPanelHtml(trial, past, recent, todayS, selStores) {
       + (per === null ? '<span class="muted">体験0件</span>' : per + '枠 <span class="muted">(' + n + '件)</span>') + '</td>'
       + '<td>' + judge + '</td></tr>';
     if (o.longList.length) {
-      h += '<tr><td></td><td colspan="5" class="muted" style="font-size:11px">分割したい日: '
+      h += '<tr><td></td><td colspan="6" class="muted" style="font-size:11px">分割したい日: '
         + esc(o.longList.slice(0, 10).join('、')) + (o.longList.length > 10 ? ' ほか' : '') + '</td></tr>';
     }
   });
