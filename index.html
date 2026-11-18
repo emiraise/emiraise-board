@@ -6215,8 +6215,10 @@ function trialBandCount(list, minLen, todayS, lim, selStores) {
   (list || []).forEach(function(x) {
     if (!x.date || x.date < todayS || x.date >= lim) return;
     if (selStores && selStores.length && selStores.indexOf(x.store) < 0) return;
+    // minLen は使わない。コースの所要時間はSTORES側が織り込み済みで、
+    // 公開区間の30分刻みの点がそのまま「予約できる開始時刻」になる（2026-11-18 修正）
     const e = hm2m(x.end_time);
-    for (let m = hm2m(x.start_time); m + minLen <= e; m += 60) {
+    for (let m = hm2m(x.start_time); m < e; m += 30) {
       const b = bandOf(Math.floor(m / 60));
       if (!b) continue;
       if (!out[x.store]) out[x.store] = {};
@@ -6308,7 +6310,12 @@ function ctrlSupply(trial, todayS, selStores) {
     let slots = 0, run = 0;
     ctrlMergeRanges(byKey[k]).forEach(function(r) {
       if (r[1] - r[0] > run) run = r[1] - r[0];
-      for (let m = r[0]; m + TRIAL_SLOT_MIN <= r[1]; m += 30) {
+      // STORESのAPIは「そのコースの所要時間ぶん確保できる開始時刻」だけを available で返す。
+      // こちらで90分の連続を作り直す必要はなく、むしろ作り直すと実際より少なく出る。
+      // 区間の終わりは「最後の開始時刻＋30分」なので、枠数は (終-始)/30 ちょうど。
+      // 例: 駅西12/12の 18:00-19:00 は 18:00と18:30 の2枠。90分幅を要求すると0枠に見えて
+      // 「夜は1枠も出せていない」と誤読する（2026-11-18 実際にそう誤った）
+      for (let m = r[0]; m < r[1]; m += 30) {
         slots++;
         const b = bandOf(Math.floor(m / 60));
         if (b) o.band[b] = (o.band[b] || 0) + 1;
