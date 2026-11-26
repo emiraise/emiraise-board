@@ -282,7 +282,8 @@
   .compass { font-weight:800; font-size:12.5px; letter-spacing:.06em; color:#7a5c1e; background:linear-gradient(135deg, #f3e7c8, #e8d5a3); padding:6px 13px; border-radius:999px; text-decoration:none; box-shadow:2px 2px 5px var(--sd, rgba(0,0,0,.12)), -2px -2px 5px var(--sl, rgba(255,255,255,.7)); margin-left:10px; white-space:nowrap; }
   .compass:hover { filter:brightness(1.04); }
   .compass.on { box-shadow:inset 2px 2px 5px rgba(122,92,30,.3); }
-  .stbreal { position:absolute; top:4px; bottom:4px; border-radius:8px; background:#7d8896; color:#fff; font-size:10.5px; font-weight:700; line-height:1.25; display:flex; align-items:center; padding:0 5px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.2); cursor:help; z-index:2; }
+  /* 文字は中央寄せ。長いブロックは左端に予約チップが重なって見出しが読めなくなる */
+  .stbreal { position:absolute; top:4px; bottom:4px; border-radius:8px; background:#7d8896; color:#fff; font-size:10.5px; font-weight:700; line-height:1.25; display:flex; align-items:center; justify-content:center; text-align:center; padding:0 5px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.2); cursor:help; z-index:2; }
   .stbreal span { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; word-break:break-all; }
   .stblk { position:absolute; top:4px; bottom:4px; border-radius:8px; background:repeating-linear-gradient(135deg, #cdd3d8 0 6px, #bcc4cb 6px 12px); color:#39424a; font-size:9.5px; display:flex; align-items:center; justify-content:center; overflow:hidden; z-index:0; }
   .moncal { position:absolute; z-index:60; background:var(--bg, #fff); border:1px solid var(--line); border-radius:14px; padding:10px; box-shadow:0 8px 24px rgba(0,0,0,.18); }
