@@ -150,6 +150,7 @@
   .shtag { font-size:10px; font-weight:400; color:var(--sub); margin-top:2px; white-space:normal; line-height:1.3; }
   .shtag.off { color:#b3261e; }
   .shtag.oth { color:#5a67a5; }
+  .shtag.away { color:#5a6570; }
   .shoff { position:absolute; top:0; bottom:0; z-index:0; background:repeating-linear-gradient(45deg, #efece6 0 8px, #e7e3da 8px 16px); color:#8a8375; font-size:11px; padding:4px 6px; overflow:hidden; white-space:nowrap; }
   .shoff.oth { background:repeating-linear-gradient(45deg, #e8ebf5 0 8px, #dfe3f2 8px 16px); color:#5a67a5; }
   .shoff.offday { display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:800; letter-spacing:.2em; color:#b3261e;
@@ -1605,6 +1606,34 @@ async function fetchStoresBlocks(fromDate, toDateExcl) {
 function sbFor(list, staffName, dateStr) {
   return (list || []).filter(function(x) { return nw(x.staff_name) === nw(staffName) && x.date === dateStr; });
 }
+// その日そのスタッフが実際に入っている店舗（シフトが正・無ければ店舗フィルタ）。
+function laneStore(sh, storeSel) {
+  if (sh && sh.store && SHIFT_STORE_TAG[sh.store]) return SHIFT_STORE_TAG[sh.store];
+  return storeSel || '';
+}
+// ブロックを「その店舗のもの(here)」と「他店のもの(away)」に分ける。
+// 他店のブロックを時間軸に帯で描くと、その店舗の予約や空き枠を塗りつぶしてしまう
+// （2026-11-26: あやなさんの金沢駅西店13-18時が金沢本店の15時の予約と17時の空きを隠した）。
+// away は名前の横にチップで出して、情報は落とさず時間軸からは外す。
+function splitSb(list, staffName, dateStr, store) {
+  const all = sbFor(list, staffName, dateStr);
+  if (!store) return { here: all, away: [] };
+  const here = [], away = [];
+  all.forEach(function(b) { (!b.store || b.store === store ? here : away).push(b); });
+  return { here: here, away: away };
+}
+function awayBlockChips(away) {
+  let h = '';
+  (away || []).forEach(function(b) {
+    const memo = (b.memo || '').replace(/\s+/g, ' ').trim();
+    const when = b.all_day ? '終日' : (b.start_time || '') + '-' + (b.end_time || '');
+    h += '<div class="shtag away" title="' + esc('他店のブロック：' + (b.store || '') + ' ' + when
+        + (memo ? '・' + memo : '（理由の記入なし）')) + '">🚫'
+      + esc((b.store || '').replace('金沢', '').replace('高柳', '')) + ' ' + esc(when)
+      + (memo ? '・' + esc(memo) : '') + '</div>';
+  });
+  return h;
+}
 function storesBlocksHtml(items) {
   let h = '';
   (items || []).forEach(function(b) {
@@ -2135,17 +2164,18 @@ async function renderTimeline(params) {
       staffs.forEach(function(st) {
         const me = nw(st) === nw(mineName) ? ' me' : '';
         const sh = shiftFor(dayShifts, st, date);
-        html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + shiftTagHtml(sh, codes) + calAllDayChips(calFor(dayCal, st, date)) + '</div><div class="tltrack" data-staff="' + esc(st) + '" data-date="' + date + '">'
+        const sbD = splitSb(dayStBlocks, st, date, laneStore(sh, storeSel));
+        html += '<div class="tlrow"><div class="tlname' + me + '">' + (me ? '👤 ' : '') + esc(st) + shiftTagHtml(sh, codes) + awayBlockChips(sbD.away) + calAllDayChips(calFor(dayCal, st, date)) + '</div><div class="tltrack" data-staff="' + esc(st) + '" data-date="' + date + '">'
           + shiftShadeHtml(sh, codes)
-          + unpubFreeHtml(dayAvail, sh, codes, rows, dayBlocks, dayStBlocks, st, date)
+          + unpubFreeHtml(dayAvail, sh, codes, rows, dayBlocks, sbD.here, st, date)
           + availBlocksHtml(availFor(dayAvail, st, date, storeSel))
-          + storesBlocksHtml(sbFor(dayStBlocks, st, date))
+          + storesBlocksHtml(sbD.here)
           + tbBlocksHtml(blocksFor(dayBlocks, st, date))
           + calBlocksHtml(calFor(dayCal, st, date))
           + tlBlocksHtml(byStaff(rows, st), dayChecks, dayMeta) + '</div></div>';
       });
       html += '</div></div>';
-      html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px"><span style="color:#1f6f54;font-weight:700">緑点線「空」＝今お客様が予約できる枠（STORES公開情報・10分ごと更新）</span>｜斜線＝シフト外・休み・会議（シフト表/カレンダーから自動）｜グレー＝固定ブロック（休憩・休み）｜<span style="color:#805e12;font-weight:700">琥珀↔＝動かせるブロック</span>。<span style="color:#5a6570;font-weight:700">🚫濃いグレー＝STORESのブロック（先頭が店舗名・管理画面から取得）</span>｜<span style="color:#6f9a86;font-weight:700">薄い点線「空」＝予約もブロックも無い時間（STORESには未公開＝お客様はまだ予約できません）</span></div>';
+      html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px"><span style="color:#1f6f54;font-weight:700">緑点線「空」＝今お客様が予約できる枠（STORES公開情報・10分ごと更新）</span>｜斜線＝シフト外・休み・会議（シフト表/カレンダーから自動）｜グレー＝固定ブロック（休憩・休み）｜<span style="color:#805e12;font-weight:700">琥珀↔＝動かせるブロック</span>。<span style="color:#5a6570;font-weight:700">🚫濃いグレー＝STORESのブロック（先頭が店舗名）。他店のブロックは名前の横に🚫チップで出します</span>｜<span style="color:#6f9a86;font-weight:700">薄い点線「空」＝予約もブロックも無い時間（STORESには未公開＝お客様はまだ予約できません）</span></div>';
     }
     if (stale(_seq)) return;
     app.innerHTML = html;
@@ -2254,11 +2284,12 @@ async function renderTimeline(params) {
         }
         ds.forEach(function(st) {
           const sh = shiftFor(shifts, st, d);
-          html += '<div class="tlrow"><div class="tlname">' + esc(st) + shiftTagHtml(sh, codes) + calAllDayChips(calFor(calEvts, st, d)) + '</div><div class="tltrack" data-staff="' + esc(st) + '" data-date="' + d + '">'
+          const sbW = splitSb(stBlocksAll, st, d, laneStore(sh, wStore));
+          html += '<div class="tlrow"><div class="tlname">' + esc(st) + shiftTagHtml(sh, codes) + awayBlockChips(sbW.away) + calAllDayChips(calFor(calEvts, st, d)) + '</div><div class="tltrack" data-staff="' + esc(st) + '" data-date="' + d + '">'
             + shiftShadeHtml(sh, codes)
-            + unpubFreeHtml(avail, sh, codes, dayRows, blocks, stBlocksAll, st, d)
+            + unpubFreeHtml(avail, sh, codes, dayRows, blocks, sbW.here, st, d)
             + availBlocksHtml(availFor(avail, st, d))
-            + storesBlocksHtml(sbFor(stBlocksAll, st, d))
+            + storesBlocksHtml(sbW.here)
             + tbBlocksHtml(blocksFor(blocks, st, d))
             + calBlocksHtml(calFor(calEvts, st, d))
             + tlBlocksHtml(byStaff(dayRows, st), checks, wkMeta)
@@ -2266,13 +2297,14 @@ async function renderTimeline(params) {
         });
       } else {
         const sh = shiftFor(shifts, staff, d);
+        const sbS = splitSb(stBlocksAll, staff, d, laneStore(sh, wStore));
         html += '<div class="tlrow"' + (i % 7 === 0 && i > 0 ? ' style="border-top:2px solid #cdd6d2"' : '') + '>'
-          + '<div class="tlname' + dayNameCls(d, today) + '">' + fmtMD(d) + shiftTagHtml(sh, codes) + calAllDayChips(calFor(calEvts, staff, d)) + '</div>'
+          + '<div class="tlname' + dayNameCls(d, today) + '">' + fmtMD(d) + shiftTagHtml(sh, codes) + awayBlockChips(sbS.away) + calAllDayChips(calFor(calEvts, staff, d)) + '</div>'
           + '<div class="tltrack" data-staff="' + esc(staff) + '" data-date="' + d + '">'
           + shiftShadeHtml(sh, codes)
-          + unpubFreeHtml(avail, sh, codes, dayRows, blocks, stBlocksAll, staff, d)
+          + unpubFreeHtml(avail, sh, codes, dayRows, blocks, sbS.here, staff, d)
           + availBlocksHtml(availFor(avail, staff, d))
-          + storesBlocksHtml(sbFor(stBlocksAll, staff, d))
+          + storesBlocksHtml(sbS.here)
           + tbBlocksHtml(blocksFor(blocks, staff, d))
           + calBlocksHtml(calFor(calEvts, staff, d))
           + tlBlocksHtml(byStaff(dayRows, staff), checks, wkMeta)
