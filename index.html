@@ -1622,7 +1622,10 @@ function storesBlocksHtml(items) {
       + ' title="' + esc('🚫 STORESブロック' + (b.store ? '【' + b.store + '】' : '') + ' '
         + (b.all_day ? '終日' : (b.start_time || '') + '-' + (b.end_time || ''))
         + (memo ? '：' + memo : '（理由の記入なし）')) + '">'
-      + '<span>' + esc(memo || '⚠️理由未記入') + '</span></div>';
+      // 他店のブロックも同じレーンに出る（sbForは店舗で絞らない）。
+      // 2026-11-26: あやなさんの金沢駅西店の13-18時ブロックが金沢本店のレーンに出て
+      // 「本店が17時まで閉まっている」と誤解された。どの店舗のブロックか必ず出す。
+      + '<span>' + esc((b.store ? b.store + '・' : '') + (memo || '⚠️理由未記入')) + '</span></div>';
   });
   return h;
 }
@@ -2142,7 +2145,7 @@ async function renderTimeline(params) {
           + tlBlocksHtml(byStaff(rows, st), dayChecks, dayMeta) + '</div></div>';
       });
       html += '</div></div>';
-      html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px"><span style="color:#1f6f54;font-weight:700">緑点線「空」＝今お客様が予約できる枠（STORES公開情報・10分ごと更新）</span>｜斜線＝シフト外・休み・会議（シフト表/カレンダーから自動）｜グレー＝固定ブロック（休憩・休み）｜<span style="color:#805e12;font-weight:700">琥珀↔＝動かせるブロック</span>。<span style="color:#5a6570;font-weight:700">🚫濃いグレー＝STORESのブロック（理由メモ付き・管理画面から取得）</span>｜<span style="color:#6f9a86;font-weight:700">薄い点線「空」＝予約もブロックも無い時間（STORESには未公開＝お客様はまだ予約できません）</span></div>';
+      html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px"><span style="color:#1f6f54;font-weight:700">緑点線「空」＝今お客様が予約できる枠（STORES公開情報・10分ごと更新）</span>｜斜線＝シフト外・休み・会議（シフト表/カレンダーから自動）｜グレー＝固定ブロック（休憩・休み）｜<span style="color:#805e12;font-weight:700">琥珀↔＝動かせるブロック</span>。<span style="color:#5a6570;font-weight:700">🚫濃いグレー＝STORESのブロック（先頭が店舗名・管理画面から取得）</span>｜<span style="color:#6f9a86;font-weight:700">薄い点線「空」＝予約もブロックも無い時間（STORESには未公開＝お客様はまだ予約できません）</span></div>';
     }
     if (stale(_seq)) return;
     app.innerHTML = html;
