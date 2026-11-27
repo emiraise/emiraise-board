@@ -3588,13 +3588,15 @@ async function renderMidCounseling(params) {
 // から自動推定し、確定できないものはスタッフが画面のプルダウンで指定する。
 // 分類は「新規継続率測定シート」の入力ルールタブと
 // カウンセリングシート「エミライズを何で知りましたか？」の選択肢に合わせる
-const LEAD_SOURCES = ['紹介', '紹介CP', 'インスタ', '検索', 'ホットペッパー', '公式LINE', 'かんざし', 'チラシ', 'その他'];
+// 「かんざし」は経路ではなくホットペッパーの連携方法なので、経路としては持たない
+// （2026-11-27 大地さん: かんざし連携＝ホットペッパー経由。体験タブの経路はこれで確定させる）
+const LEAD_SOURCES = ['紹介', '紹介CP', 'インスタ', '検索', 'ホットペッパー', '公式LINE', 'チラシ', 'その他'];
 // 店舗バッジ（STORE_COLOR_MAP）と並ぶため、店舗色とも経路どうしとも
 // 見分けがつく色を選んである（CIE-Lab距離26以上）。安易に変えないこと
 const LEAD_STYLE = {
   '紹介': '#009959', '紹介CP': '#8a00a5', 'インスタ': '#a5006e', '検索': '#2986a5',
   'ホットペッパー': '#a50000', '公式LINE': '#0c9900', 'チラシ': '#8c8383',
-  'かんざし': '#6a7f00', 'その他': '#6f6f6f', '未設定': '#adadad'
+  'その他': '#6f6f6f', '未設定': '#adadad'
 };
 // 表記ゆれをタブの分類名に寄せる（例:「インスタグラム」→ Instagram）
 function normSource(v) {
@@ -3604,9 +3606,8 @@ function normSource(v) {
   if (/紹介|口コミ|知人|友人|家族/.test(t)) return '紹介';
   if (/line|ライン|Lステップ|lステップ|ＬＩＮＥ/i.test(t)) return '公式LINE';
   if (/insta|インスタ/i.test(t)) return 'インスタ';
-  if (/hpb|ホットペッパー|ホッペ/i.test(t)) return 'ホットペッパー';
+  if (/hpb|ホットペッパー|ホッペ|かんざし/i.test(t)) return 'ホットペッパー';
   if (/検索|google|グーグル|ググ|web|ホームページ|HP|ネット/i.test(t)) return '検索';
-  if (/かんざし/i.test(t)) return 'かんざし';
   if (/チラシ|看板|ポスティング|折込|のぼり/i.test(t)) return 'チラシ';
   return LEAD_SOURCES.indexOf(t) >= 0 ? t : 'その他';
 }
@@ -3639,9 +3640,10 @@ function leadSourceOf(r, cust, manual, isPortalRow, byName, pKey) {
   const key = (r.merchant_id || '') + '|' + r.customer_id;
   if (manual && manual[key]) return { src: normSource(manual[key]), auto: false };
   // 継続率測定シート／カウンセリング回答に本人の申告があればそれが正
-  // かんざし経由は予約メニューに「(かんざしから自動生成)」と残る確かな記録なので、
-  // シートの記入より優先する（どこで知ったかではなく、どの窓口で予約したか）
-  if (isPortalRow) return { src: 'かんざし', auto: false, from: 'portal' };
+  // かんざし連携＝ホットペッパー経由。予約メニューに「(かんざしから自動生成)」と
+  // 残る確かな記録なので、シートの記入より優先して「ホットペッパー」で確定させる
+  // （どこで知ったかの申告ではなく、どの窓口から予約が入ったかの事実）
+  if (isPortalRow) return { src: 'ホットペッパー', auto: false, from: 'portal' };
   if (byName) {
     const keys = [pKey(r), nameKey(r.customer_name)];
     for (let i = 0; i < keys.length; i++) {
@@ -3667,7 +3669,7 @@ function leadBadge(v) {
   const why = v.auto ? 'STORESのデータからの推定（プルダウンで確定できます）'
     : v.from === 'form' ? 'カウンセリングシートのご本人の回答'
     : v.from === 'sheet' ? '新規継続率測定シートの記入'
-    : v.from === 'portal' ? 'かんざし経由の予約（予約メニューに記録が残っています）'
+    : v.from === 'portal' ? 'ホットペッパー経由（かんざし連携）の予約。予約メニューに記録が残っています'
     : v.from === 'alias' ? 'シート側の氏名が1文字違いのため、同一のお客様として照合したもの'
     : 'スタッフがこの画面で指定した経路';
   return '<span class="badge" style="background:' + bg + ';font-size:10px" title="' + why + '">'
@@ -3879,8 +3881,8 @@ async function renderTrial() {
       + (nm2 ? chipT('when', 'next', '翌月 ' + nm2 + '件', 'background:#5a67a5;color:#fff', '') : '')
       + chipT('when', 'last', '先月 ' + lm + '件', '', '')
       + chipT('when', 'week', '今週 ' + wk + '件', '', '')
-      + (po ? chipT('when', 'kanzashi', 'うち🔖かんざし 今月' + po + '件', '',
-                    '今月の体験' + tm + '件のうち、かんざし経由のご予約') : '')
+      + (po ? chipT('when', 'kanzashi', 'うち🔖ホットペッパー 今月' + po + '件', '',
+                    '今月の体験' + tm + '件のうち、ホットペッパー（かんざし連携）から入ったご予約') : '')
       + '</div>' + outcomeChips(subset) + staffChips(subset) + srcChips(subset);
   }
   // 月ごとの内訳。同じ方・同じ日・同じ店舗の重複取り込み（STORESとワンモア、
@@ -3940,8 +3942,8 @@ async function renderTrial() {
                          'キャンセル後に別の日で来店された方') : '')
       + '</div>';
   }
-  // かんざし連携の実績。予約メニューに「(かんざしから自動生成)」と残るので確実に数えられる。
-  // どの店舗で連携が生きているかを、憶測ではなく実際の予約から示す
+  // ホットペッパー（かんざし連携）の実績。予約メニューに「(かんざしから自動生成)」と
+  // 残るので確実に数えられる。どの店舗で連携が生きているかを実際の予約から示す
   function kanzashiHtml(all) {
     const rows = all.filter(isPortal);
     const byStore = {}, byMonth = {};
@@ -3967,14 +3969,14 @@ async function renderTrial() {
     // 連携が入っていない店舗も並べて、どこが未接続か分かるようにする
     const stores = STORE_ORDER_ALL.slice();
     Object.keys(byStore).forEach(function(k) { if (stores.indexOf(k) < 0) stores.push(k); });
-    let o = '<div class="card" style="border-left:5px solid ' + LEAD_STYLE['かんざし'] + '">'
-      + '<h3>🔖 かんざし連携の実績</h3>';
+    let o = '<div class="card" style="border-left:5px solid ' + LEAD_STYLE['ホットペッパー'] + '">'
+      + '<h3>🔖 ホットペッパー連携（かんざし）の実績</h3>';
     if (!total) {
-      o += '<div class="empty">かんざし経由の予約はまだありません</div></div>';
+      o += '<div class="empty">ホットペッパー経由の予約はまだありません</div></div>';
       return o;
     }
     o += '<div class="chips">'
-      + '<a style="pointer-events:none;background:' + LEAD_STYLE['かんざし'] + ';color:#fff">予約 ' + total + '件</a>'
+      + '<a style="pointer-events:none;background:' + LEAD_STYLE['ホットペッパー'] + ';color:#fff">予約 ' + total + '件</a>'
       + '<a style="pointer-events:none">来店 ' + visited + '件</a>'
       + '<a style="pointer-events:none;background:#0c7a3e;color:#fff">✅ 成約 ' + won + '件（' + cvr + '%）</a>'
       + (cx ? '<a style="pointer-events:none;background:#8a2b22;color:#fff">❌ キャンセル ' + cx + '件</a>' : '')
@@ -3993,8 +3995,9 @@ async function renderTrial() {
     });
     o += '</div>';
     o += '<div style="color:var(--sub);font-size:11px;margin-top:6px">'
-      + '予約メニューに「(かんざしから自動生成)」と記録が残るため、確実に判別できます。'
-      + '「連携なし」の店舗はかんざし経由の予約が1件もありません</div>';
+      + '予約メニューに「(かんざしから自動生成)」と記録が残るため、経路は推定ではなく確定です。'
+      + '「連携なし」の店舗はかんざし経由の予約が1件もありません（ホットペッパーを見て'
+      + 'エミライズの予約ページから入った方は、ここには出ずカウンセリング回答で判定します）</div>';
     return o + '</div>';
   }
   // 経路別の内訳（今月／全期間）。クリックでその経路だけに絞り込む
@@ -4191,7 +4194,7 @@ async function renderTrial() {
           + '<a style="color:var(--accent);text-decoration:none;font-weight:700" href="#/c/' + encodeURIComponent(r.merchant_id) + '/' + r.customer_id + '">' + esc(r.customer_name || '（名前なし）') + '</a>'
           + storeCell(r, showStore) + leadBadge(srcOf(r)) + srcSelect(r)
           + '<span class="tstaff" style="color:var(--sub)">' + esc((r.staff_names || []).join('・')) + '</span>'
-          + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0">🔖 かんざし</span>' : '<span></span>')
+          + (isPortal(r) ? '<span class="pill" style="background:#f0e4d0" title="ホットペッパー（かんざし連携）から自動で入った予約">🔖 HPB連携</span>' : '<span></span>')
           + stampCell(r)
           + '</div>';
       });
@@ -4288,7 +4291,7 @@ async function renderTrial() {
   });
   html += kanzashiHtml(byStore);
   const WHEN_LABEL = { fut: 'これからの体験', cur: '今月', next: '翌月', last: '先月',
-                       week: '今週', kanzashi: 'かんざし（今月）' };
+                       week: '今週', kanzashi: 'ホットペッパー連携（今月）' };
   const RES_LABEL  = { won: '成約', lost: '未成約', cx: 'キャンセル', resched: '振替' };
   if (selWhen || selRes || selSrc || selStaff) {
     const names = [];
@@ -4304,7 +4307,7 @@ async function renderTrial() {
       + '</div>';
   }
   html += listHtml(subset, !selStore);
-  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋かんざし経由（🔖）の予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
+  html += '<div style="color:var(--sub);font-size:11px;margin:6px 2px">体験キャンペーン（12,000円→1,000円）＋ホットペッパー連携（🔖）の予約を自動抽出（過去120日〜今後92日・5分ごと更新）。名前をタップすると顧客ページ（連絡先・カルテ）へ</div>';
   if (syncAgoH !== null && syncAgoH > 26) {
     const d = Math.floor(syncAgoH / 24);
     html += '<div class="mhead warn">⚠️ 継続率測定シートの取り込みが'
@@ -7236,7 +7239,7 @@ async function renderStore(storeName, params) {
       if (!k || seen[k]) return;
       seen[k] = true;
       const sc = srcByName[k + '|' + storeName] || srcByName[k]
-        || (/かんざしから自動生成/.test(r.menu || '') ? 'かんざし' : '');
+        || (/かんざしから自動生成/.test(r.menu || '') ? 'ホットペッパー' : '');
       if (!sc) needSrc.push(r);
       const o = outcome[k] || {};
       if (!isWon(k) && !o.sheet_lost && !o.manual_outcome) needOut.push(r);
@@ -7467,7 +7470,7 @@ async function renderStore(storeName, params) {
   const srcTally = {};
   recent.forEach(function(r) {
     let sc = srcByName[pkey(r) + '|' + storeName] || srcByName[pkey(r)] || '';
-    if (!sc && /かんざしから自動生成/.test(r.menu || '')) sc = 'かんざし';
+    if (!sc && /かんざしから自動生成/.test(r.menu || '')) sc = 'ホットペッパー';
     srcTally[sc || '未設定'] = (srcTally[sc || '未設定'] || 0) + 1;
   });
   const srcKeys = LEAD_SOURCES.concat(['未設定']).filter(function(k) { return srcTally[k]; });
